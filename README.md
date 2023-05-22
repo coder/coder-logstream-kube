@@ -25,10 +25,10 @@ helm install coder-logstream-kube coder-logstream-kube/coder-logstream-kube \
 ```
 
 > **Note**
-> For additional customization (like customizing the image, pull secrets, annotations, etc.), you can use the
+> For additional customization (such as customizing the image, pull secrets, annotations, etc.), you can use the
 > [values.yaml](https://github.com/coder/coder-logstream-kube/blob/main/values.yaml) file directly.
 
-Ensure your Coder template is using a `kubernetes_deployment` resource with the `wait_for_rollout` property set to false.
+Your Coder template should be using a `kubernetes_deployment` resource with `wait_for_rollout` set to `false`.
 
 ```hcl
 resource "kubernetes_deployment" "hello_world" {
@@ -37,4 +37,4 @@ resource "kubernetes_deployment" "hello_world" {
 }
 ```
 
-This will ensure all pod events will be sent during initialization and startup.
+This ensures all pod events will be sent during initialization and startup.
