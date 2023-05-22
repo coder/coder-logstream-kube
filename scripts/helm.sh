@@ -9,7 +9,7 @@
 # If no version is specified, defaults to the version from ./version.sh.
 #
 # If no output path is specified, defaults to
-# "$repo_root/build/coder_helm_$version.tgz".
+# "$repo_root/build/coder_logstream_kube_helm_$version.tgz".
 #
 # If the --push parameter is specified, the resulting artifact will be published
 # to the Coder OSS repo. This requires `gsutil` to be installed and configured.
@@ -54,12 +54,12 @@ done
 # Remove the "v" prefix.
 version="${version#v}"
 if [[ "$version" == "" ]]; then
-	version="$(execrelative ./version.sh)"
+	version="$(./scripts/version.sh)"
 fi
 
 if [[ "$output_path" == "" ]]; then
 	mkdir -p build
-	output_path="$(realpath "build/coder_helm_$version.tgz")"
+	output_path="$(realpath "build/$version.tgz")"
 fi
 
 # Make a destination temporary directory, as you cannot fully control the output

@@ -56,3 +56,25 @@ jobs:
           docker tag coder-logstream-kube:latest $BASE:latest
           docker push $IMAGE
           docker push $BASE:latest
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_ID_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup GCloud SDK
+        uses: "google-github-actions/setup-gcloud@v1"
+
+      - name: Publish Helm Chart
+        run: |
+          set -euo pipefail
+          version="$(./scripts/version.sh)"
+          ./scripts/helm.sh --version $version
+
+          mkdir -p build/helm
+          cp "build/${version}.tgz" build/helm
+          gsutil cp gs://helm.coder.com/logstream-kube/index.yaml build/helm/index.yaml
+          helm repo index build/helm --url https://helm.coder.com/logstream-kube --merge build/helm/index.yaml
+          gsutil -h "Cache-Control:no-cache,max-age=0" cp build/helm/${version}.tgz gs://helm.coder.com/logstream-kube
+          gsutil -h "Cache-Control:no-cache,max-age=0" cp build/helm/index.yaml gs://helm.coder.com/logstream-kube

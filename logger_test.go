@@ -34,10 +34,11 @@ func TestPodEventLogger(t *testing.T) {
 	client := fake.NewSimpleClientset()
 	ctx := context.Background()
 	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
-		client:    client,
-		coderURL:  agentURL,
-		namespace: namespace,
-		logger:    slogtest.Make(t, nil),
+		client:      client,
+		coderURL:    agentURL,
+		namespace:   namespace,
+		logger:      slogtest.Make(t, nil),
+		logDebounce: time.Millisecond,
 	})
 	require.NoError(t, err)
 
