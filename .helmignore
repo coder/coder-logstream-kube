@@ -1,0 +1,11 @@
+.vscode
+*.mod
+*.sum
+*.go
+*.md
+scripts/
+build/
+.github/
+.git/
+.gitignore
+.helmignore

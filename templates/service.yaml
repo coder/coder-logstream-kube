@@ -1,0 +1,60 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: coder-logstream-kube-role
+rules:
+- apiGroups: [""]
+  resources: ["pods", "events"]
+  verbs: ["get", "watch", "list"]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.serviceAccount.name | quote }}
+  annotations: {{ toYaml .Values.serviceAccount.annotations | nindent 4 }}
+  labels: {{ toYaml .Values.serviceAccount.labels | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: coder-logstream-kube-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: coder-logstream-kube-role
+subjects:
+- kind: ServiceAccount
+  name: {{ .Values.serviceAccount.name | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coder-logstream-kube
+spec:
+  # This must remain at 1 otherwise duplicate logs can occur!
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name | quote }}
+      restartPolicy: Always
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+      {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: coder-logstream-kube
+          image: "{{ .Values.image.repo }}:{{ .Values.image.tag | default (printf "v%v" .Chart.AppVersion) }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /coder-logstream-kube
+          env:
+            - name: CODER_URL
+              value: {{ .Values.url }}
+            - name: CODER_NAMESPACE
+              value: {{  .Values.namespace | default .Release.Namespace }}

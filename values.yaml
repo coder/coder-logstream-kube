@@ -1,0 +1,31 @@
+# url -- The URL of your Coder deployment.
+url: ""
+
+# namespace -- The namespace to searching for Pods within.
+# If unspecified, this defaults to the Helm namespace.
+namespace: ""
+
+# image -- The image to use.
+image:
+  # image.repo -- The repository of the image.
+  repo: "ghcr.io/coder/coder-logstream-kube"
+  # image.tag -- The tag of the image, defaults to {{.Chart.AppVersion}}
+  # if not set. If you're using the chart directly from git, the default
+  # app version will not work and you'll need to set this value. The helm
+  # chart helpfully fails quickly in this case.
+  tag: ""
+  # image.pullPolicy -- The pull policy to use for the image. See:
+  # https://kubernetes.io/docs/concepts/containers/images/#image-pull-policy
+  pullPolicy: IfNotPresent
+  # image.pullSecrets -- The secrets used for pulling the Coder image from
+  # a private registry.
+  pullSecrets: []
+  #  - name: "pull-secret"
+
+serviceAccount:
+  # serviceAccount.annotations -- The service account annotations.
+  annotations: {}
+  # serviceAccount.labels -- The service account labels.
+  labels: {}
+  # coder.serviceAccount.name -- The service account name
+  name: coder-logstream-kube
