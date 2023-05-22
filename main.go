@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"cdr.dev/slog/sloggers/sloghuman"
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/kubernetes"
+	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -48,7 +50,10 @@ func root() *cobra.Command {
 				kubeConfig = home + kubeConfig[1:]
 			}
 
-			config, err := clientcmd.BuildConfigFromFlags("", kubeConfig)
+			config, err := restclient.InClusterConfig()
+			if errors.Is(err, restclient.ErrNotInCluster) {
+				config, err = clientcmd.BuildConfigFromFlags("", kubeConfig)
+			}
 			if err != nil {
 				return fmt.Errorf("build kubeconfig: %w", err)
 			}
