@@ -39,6 +39,12 @@ resource "kubernetes_deployment" "hello_world" {
 
 This ensures all pod events will be sent during initialization and startup.
 
+## How?
+
+Kubernetes provides an [informers](https://pkg.go.dev/k8s.io/client-go/informers) API that streams pod and event data from the API server.
+
+`coder-logstream-kube` listens for pod creation events with containers that have the `CODER_AGENT_TOKEN` environment variable set. All pod events are streamed as logs to the Coder API using the agent token for authentication.
+
 ## Custom Certificates
 
 - [`SSL_CERT_FILE`](https://go.dev/src/crypto/x509/root_unix.go#L19): Specifies the path to an SSL certificate.
