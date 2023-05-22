@@ -24,7 +24,7 @@ helm install coder-logstream-kube coder-logstream-kube/coder-logstream-kube \
     --set url=<your-coder-url>
 ```
 
-> *Note*
+> **Note**
 > For additional customization (like customizing the image, pull secrets, annotations, etc.), you can use the
 > [values.yaml](https://github.com/coder/coder-logstream-kube/blob/main/values.yaml) file directly.
 
