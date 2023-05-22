@@ -18,8 +18,8 @@ Stream Kubernetes Pod events to the Coder startup logs.
 Apply the Helm chart to start streaming logs into your Coder instance:
 
 ```console
-helm repo add coder-v2 https://helm.coder.com/v2
-helm install coder-logstream-kube coder-v2/coder-logstream-kube \
+helm repo add coder-logstream-kube https://helm.coder.com/logstream-kube
+helm install coder-logstream-kube coder-logstream-kube/coder-logstream-kube \
     --namespace coder \
     --set url=<your-coder-url>
 ```
