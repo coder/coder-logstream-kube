@@ -38,3 +38,8 @@ resource "kubernetes_deployment" "hello_world" {
 ```
 
 This ensures all pod events will be sent during initialization and startup.
+
+## Custom Certificates
+
+- [`SSL_CERT_FILE`](https://go.dev/src/crypto/x509/root_unix.go#L19): Specifies the path to an SSL certificate.
+- [`SSL_CERT_DIR`](https://go.dev/src/crypto/x509/root_unix.go#L25): Identifies which directory to check for SSL certificate files.

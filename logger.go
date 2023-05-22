@@ -18,6 +18,11 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
+
+	// *Never* remove this. Certificates are not bundled as part
+	// of the container, so this is necessary for all connections
+	// to not be insecure.
+	_ "github.com/breml/rootcerts"
 )
 
 type podEventLoggerOptions struct {
@@ -137,18 +142,17 @@ func (p *podEventLogger) init() error {
 			p.mutex.Lock()
 			defer p.mutex.Unlock()
 			tokens, ok := p.podToAgentTokens[pod.Name]
-			delete(p.podToAgentTokens, pod.Name)
-			if ok {
-				for _, token := range tokens {
-					p.sendLog(pod.Name, token, agentsdk.StartupLog{
-						CreatedAt: time.Now(),
-						Output:    fmt.Sprintf("🗑️ %s: %s", newColor(color.Bold).Sprint("Deleted pod"), pod.Name),
-						Level:     codersdk.LogLevelError,
-					})
-				}
-
+			if !ok {
+				return
 			}
-
+			delete(p.podToAgentTokens, pod.Name)
+			for _, token := range tokens {
+				p.sendLog(pod.Name, token, agentsdk.StartupLog{
+					CreatedAt: time.Now(),
+					Output:    fmt.Sprintf("🗑️ %s: %s", newColor(color.Bold).Sprint("Deleted pod"), pod.Name),
+					Level:     codersdk.LogLevelError,
+				})
+			}
 			p.logger.Info(p.ctx, "unregistered agent pod", slog.F("pod", pod.Name))
 		},
 	})
