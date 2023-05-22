@@ -51,8 +51,7 @@ while true; do
 	esac
 done
 
-# Remove the "v" prefix.
-version="${version#v}"
+version="${version}"
 if [[ "$version" == "" ]]; then
 	version="$(./scripts/version.sh)"
 fi
