@@ -6,6 +6,9 @@ rules:
 - apiGroups: [""]
   resources: ["pods", "events"]
   verbs: ["get", "watch", "list"]
+- apiGroups: ["apps"]
+  resources: ["replicasets", "events"]
+  verbs: ["get", "watch", "list"]
 ---
 apiVersion: v1
 kind: ServiceAccount
