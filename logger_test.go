@@ -83,8 +83,8 @@ func TestReplicaSetEvents(t *testing.T) {
 			},
 		},
 		InvolvedObject: corev1.ObjectReference{
-			Kind: "Pod",
-			Name: "test-pod",
+			Kind: "ReplicaSet",
+			Name: "test-rs",
 		},
 		Reason:  "Test",
 		Message: "Test event",
