@@ -21,7 +21,7 @@ Apply the Helm chart to start streaming logs into your Coder instance:
 helm repo add coder-logstream-kube https://helm.coder.com/logstream-kube
 helm install coder-logstream-kube coder-logstream-kube/coder-logstream-kube \
     --namespace coder \
-    --set url=<your-coder-url>
+    --set url=<your-coder-url-including-http-or-https>
 ```
 
 > **Note**
@@ -32,6 +32,7 @@ Your Coder template should be using a `kubernetes_deployment` resource with `wai
 
 ```hcl
 resource "kubernetes_deployment" "hello_world" {
+  count = data.coder_workspace.me.start_count  
   wait_for_rollout = false
   ...
 }

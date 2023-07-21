@@ -1,4 +1,4 @@
-# url -- The URL of your Coder deployment.
+# url -- The URL of your Coder deployment. Must prefix with http or https
 url: ""
 
 # namespace -- The namespace to searching for Pods within.
