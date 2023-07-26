@@ -61,3 +61,17 @@ spec:
               value: {{ .Values.url }}
             - name: CODER_NAMESPACE
               value: {{  .Values.namespace | default .Release.Namespace }}
+            {{- if .Values.image.sslCertFile }}
+            - name: SSL_CERT_FILE
+              value: {{ .Values.image.sslCertFile }}
+            {{- end }}
+            {{- if .Values.image.sslCertDir }}
+            - name: SSL_CERT_DIR
+              value: {{ .Values.image.sslCertDir }}
+            {{- end }}
+          {{- if .Values.volumeMounts }}
+          volumeMounts: {{- toYaml .Values.volumeMounts | nindent 12 }}
+          {{- end }}
+      {{- if .Values.volumes }}
+      volumes: {{- toYaml .Values.volumes | nindent 8 }}
+      {{- end }}

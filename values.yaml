@@ -5,6 +5,16 @@ url: ""
 # If unspecified, this defaults to the Helm namespace.
 namespace: ""
 
+# volumes -- A list of extra volumes to add to the coder-logstream pod.
+volumes:
+  #   emptyDir: {}
+  # - name: "my-volume"
+
+# volumeMounts -- A list of extra volume mounts to add to the coder-logstream pod.
+volumeMounts:
+  # - name: "my-volume"
+  #   mountPath: "/mnt/my-volume"
+
 # image -- The image to use.
 image:
   # image.repo -- The repository of the image.
@@ -21,6 +31,12 @@ image:
   # a private registry.
   pullSecrets: []
   #  - name: "pull-secret"
+  # image.sslCertFile -- Location of the SSL certificate file. Sets the $SSL_CERT_FILE
+  # variable inside of the container.
+  sslCertFile: ""
+  # image.sslCertDir -- Directory to check for SSL certificate files. Sets the $SSL_CERT_DIR
+  # variable inside of the container.
+  sslCertDir: ""
 
 serviceAccount:
   # serviceAccount.annotations -- The service account annotations.
