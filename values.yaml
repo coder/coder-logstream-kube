@@ -45,3 +45,6 @@ serviceAccount:
   labels: {}
   # coder.serviceAccount.name -- The service account name
   name: coder-logstream-kube
+
+# nodeSelector -- Node labels for constraining the coder-logstream pod to specific nodes.
+nodeSelector: {}
