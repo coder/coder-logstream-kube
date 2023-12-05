@@ -300,7 +300,9 @@ func (p *podEventLogger) init() error {
 // If a logger already exists for the token, it's returned. Otherwise a new
 // logger is created and returned.
 func (p *podEventLogger) sendLog(resourceName, token string, log agentsdk.StartupLog) {
+	p.mutex.Lock()
 	logger, ok := p.agentTokenToLogger[token]
+	p.mutex.Unlock()
 	if !ok {
 		client := agentsdk.New(p.coderURL)
 		client.SetSessionToken(token)
