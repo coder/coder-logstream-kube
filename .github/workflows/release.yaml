@@ -1,8 +1,8 @@
 name: release
 on:
   push:
-    tags:
-      - "v*"
+    # tags:
+    #   - "v*"
 
 permissions:
   # Required to publish a release
