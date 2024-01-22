@@ -48,3 +48,8 @@ serviceAccount:
 
 # nodeSelector -- Node labels for constraining the coder-logstream pod to specific nodes.
 nodeSelector: {}
+
+# labels -- The pod labels for coder-logstream-kube. See:
+# https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/
+podLabels:
+  eric: is awesome
