@@ -299,7 +299,8 @@ func (p *podEventLogger) init() error {
 
 // loggerForToken returns a logger for the given pod name and agent token.
 // If a logger already exists for the token, it's returned. Otherwise a new
-// logger is created and returned.
+// logger is created and returned. It assumes a lock to p.mutex is already being
+// held.
 func (p *podEventLogger) sendLog(resourceName, token string, log agentsdk.StartupLog) {
 	logger, ok := p.agentTokenToLogger[token]
 	if !ok {
@@ -329,7 +330,7 @@ func (p *podEventLogger) sendLog(resourceName, token string, log agentsdk.Startu
 		// If the logger was already closed, we await the close before
 		// creating a new logger. This is to ensure all loggers get sent in order!
 		_ = logger.closer.Close()
-		go p.sendLog(resourceName, token, log)
+		p.sendLog(resourceName, token, log)
 		return
 	}
 	// We make this 5x the debounce because it's low-cost to persist a few

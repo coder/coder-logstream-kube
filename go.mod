@@ -3,12 +3,15 @@ module github.com/coder/coder-kubernetes-logs
 go 1.20
 
 // Required to import the codersdk!
-replace tailscale.com => github.com/coder/tailscale v1.1.1-0.20230418202606-ed9307cf1b22
+replace tailscale.com => github.com/coder/tailscale v0.0.0-20230522123520-74712221d00f
+
+replace gvisor.dev/gvisor => github.com/coder/gvisor v0.0.0-20230714132058-be2e4ac102c3
 
 require (
 	cdr.dev/slog v1.5.3
+	github.com/breml/rootcerts v0.2.11
 	github.com/coder/coder v0.23.6-0.20230522192129-95839109db09
-	github.com/coder/retry v1.3.1-0.20230210155434-e90a2e1e091d
+	github.com/fatih/color v1.15.0
 	github.com/spf13/cobra v1.7.0
 	github.com/stretchr/testify v1.8.2
 	github.com/zeebo/assert v1.3.0
@@ -32,17 +35,17 @@ require (
 	github.com/armon/go-radix v1.0.0 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/breml/rootcerts v0.2.11 // indirect
+	github.com/bytedance/sonic v1.10.2 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.0 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/charmbracelet/lipgloss v0.7.1 // indirect
+	github.com/coder/retry v1.3.1-0.20230210155434-e90a2e1e091d // indirect
 	github.com/coder/terraform-provider-coder v0.6.23 // indirect
 	github.com/coreos/go-iptables v0.6.0 // indirect
 	github.com/coreos/go-oidc/v3 v3.6.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/emicklei/go-restful/v3 v3.9.0 // indirect
 	github.com/evanphx/json-patch v4.12.0+incompatible // indirect
-	github.com/fatih/color v1.15.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.4.0 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/go-chi/chi/v5 v5.0.8 // indirect
@@ -54,6 +57,7 @@ require (
 	github.com/go-openapi/jsonreference v0.20.1 // indirect
 	github.com/go-openapi/swag v0.22.3 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
+	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/glog v1.0.0 // indirect
@@ -175,7 +179,6 @@ require (
 	google.golang.org/grpc v1.54.0 // indirect
 	google.golang.org/protobuf v1.30.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
-	gopkg.in/square/go-jose.v2 v2.6.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gvisor.dev/gvisor v0.0.0-20221203005347-703fd9b7fbc0 // indirect
