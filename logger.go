@@ -9,9 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"cdr.dev/slog"
-	"github.com/coder/coder/codersdk"
-	"github.com/coder/coder/codersdk/agentsdk"
 	"github.com/fatih/color"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -19,6 +16,10 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
+
+	"cdr.dev/slog"
+	"github.com/coder/coder/codersdk"
+	"github.com/coder/coder/codersdk/agentsdk"
 
 	// *Never* remove this. Certificates are not bundled as part
 	// of the container, so this is necessary for all connections
@@ -298,7 +299,8 @@ func (p *podEventLogger) init() error {
 
 // loggerForToken returns a logger for the given pod name and agent token.
 // If a logger already exists for the token, it's returned. Otherwise a new
-// logger is created and returned.
+// logger is created and returned. It assumes a lock to p.mutex is already being
+// held.
 func (p *podEventLogger) sendLog(resourceName, token string, log agentsdk.StartupLog) {
 	logger, ok := p.agentTokenToLogger[token]
 	if !ok {
@@ -328,7 +330,7 @@ func (p *podEventLogger) sendLog(resourceName, token string, log agentsdk.Startu
 		// If the logger was already closed, we await the close before
 		// creating a new logger. This is to ensure all loggers get sent in order!
 		_ = logger.closer.Close()
-		go p.sendLog(resourceName, token, log)
+		p.sendLog(resourceName, token, log)
 		return
 	}
 	// We make this 5x the debounce because it's low-cost to persist a few
