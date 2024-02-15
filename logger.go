@@ -9,9 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"cdr.dev/slog"
-	"github.com/coder/coder/codersdk"
-	"github.com/coder/coder/codersdk/agentsdk"
 	"github.com/fatih/color"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -19,6 +16,10 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
+
+	"cdr.dev/slog"
+	"github.com/coder/coder/codersdk"
+	"github.com/coder/coder/codersdk/agentsdk"
 
 	// *Never* remove this. Certificates are not bundled as part
 	// of the container, so this is necessary for all connections
@@ -300,9 +301,7 @@ func (p *podEventLogger) init() error {
 // If a logger already exists for the token, it's returned. Otherwise a new
 // logger is created and returned.
 func (p *podEventLogger) sendLog(resourceName, token string, log agentsdk.StartupLog) {
-	p.mutex.Lock()
 	logger, ok := p.agentTokenToLogger[token]
-	p.mutex.Unlock()
 	if !ok {
 		client := agentsdk.New(p.coderURL)
 		client.SetSessionToken(token)
