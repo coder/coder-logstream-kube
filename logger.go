@@ -330,7 +330,11 @@ func (p *podEventLogger) sendLog(resourceName, token string, log agentsdk.Startu
 		// If the logger was already closed, we await the close before
 		// creating a new logger. This is to ensure all loggers get sent in order!
 		_ = logger.closer.Close()
-		p.sendLog(resourceName, token, log)
+		go func() {
+			p.mutex.Lock()
+			defer p.mutex.Unlock()
+			p.sendLog(resourceName, token, log)
+		}()
 		return
 	}
 	// We make this 5x the debounce because it's low-cost to persist a few
