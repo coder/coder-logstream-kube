@@ -43,7 +43,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/instance: {{ .Release.Name }}
-        {{- with .Values.podLabels }}
+        {{- with .Values.labels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
