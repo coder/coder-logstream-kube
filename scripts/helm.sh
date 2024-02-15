@@ -65,13 +65,16 @@ fi
 # path of `helm package` except for the directory name :/
 temp_dir="$(mktemp -d)"
 
-cd ./
+cd .
+mkdir -p build
+cp ./LICENSE build
+cp -r helm/* build
 log "--- Packaging helm chart for version $version ($output_path)"
 helm package \
 	--version "$version" \
 	--app-version "$version" \
 	--destination "$temp_dir" \
-	. 1>&2
+	./build 1>&2
 
 log "Moving helm chart to $output_path"
 cp "$temp_dir"/*.tgz "$output_path"
