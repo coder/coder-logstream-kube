@@ -46,8 +46,43 @@ serviceAccount:
   # coder.serviceAccount.name -- The service account name
   name: coder-logstream-kube
 
+# resources -- The resources to request for the Deployment. These are optional
+# and are not set by default.
+resources:
+  {}
+  # limits:
+  #   cpu: 500m
+  #   memory: 500Mi
+  # requests:
+  #   cpu: 2000m
+  #   memory: 2000Mi
+
 # nodeSelector -- Node labels for constraining the coder-logstream pod to specific nodes.
 nodeSelector: {}
+
+# affinity -- Allows specifying an affinity rule for the Deployment.
+# The default rule prefers to schedule coder pods on different
+# nodes, which is only applicable if coder.replicaCount is greater than 1.
+affinity: {}
+  # podAntiAffinity:
+  #   preferredDuringSchedulingIgnoredDuringExecution:
+  #     - podAffinityTerm:
+  #         labelSelector:
+  #           matchExpressions:
+  #             - key: app.kubernetes.io/instance: coder-logstream-kube
+  #               operator: In
+  #               values:
+  #                 - "true"
+  #         topologyKey: kubernetes.io/hostname
+  #       weight: 1
+
+# tolerations -- Tolerations for tainted nodes.
+# See: https://kubernetes.io/docs/concepts/configuration/taint-and-toleration/
+tolerations: {}
+  # - key: "key"
+  #   operator: "Equal"
+  #   value: "value"
+  #   effect: "NoSchedule"
 
 # labels -- The pod labels for coder-logstream-kube. See:
 # https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/
