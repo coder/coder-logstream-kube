@@ -63,7 +63,8 @@ nodeSelector: {}
 # affinity -- Allows specifying an affinity rule for the Deployment.
 # The default rule prefers to schedule coder pods on different
 # nodes, which is only applicable if coder.replicaCount is greater than 1.
-affinity: {}
+affinity:
+  {}
   # podAntiAffinity:
   #   preferredDuringSchedulingIgnoredDuringExecution:
   #     - podAffinityTerm:
@@ -78,7 +79,8 @@ affinity: {}
 
 # tolerations -- Tolerations for tainted nodes.
 # See: https://kubernetes.io/docs/concepts/configuration/taint-and-toleration/
-tolerations: {}
+tolerations:
+  {}
   # - key: "key"
   #   operator: "Equal"
   #   value: "value"

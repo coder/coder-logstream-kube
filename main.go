@@ -69,7 +69,7 @@ func root() *cobra.Command {
 				namespace:     namespace,
 				fieldSelector: fieldSelector,
 				labelSelector: labelSelector,
-				logger:        slog.Make(sloghuman.Sink(cmd.ErrOrStderr())),
+				logger:        slog.Make(sloghuman.Sink(cmd.ErrOrStderr())).Leveled(slog.LevelDebug),
 			})
 			if err != nil {
 				return fmt.Errorf("create pod event reporter: %w", err)
