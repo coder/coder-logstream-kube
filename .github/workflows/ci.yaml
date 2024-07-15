@@ -37,7 +37,7 @@ jobs:
           echo "GOMODCACHE=$(go env GOMODCACHE)" >> ${{ runner.os == 'Windows' && '$env:' || '$' }}GITHUB_OUTPUT
 
       - name: Go Build Cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ${{ steps.go-cache-paths.outputs.GOCACHE }}
           key: ${{ runner.os }}-go-build-${{ hashFiles('**/go.**', '**.go') }}
