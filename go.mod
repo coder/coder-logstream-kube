@@ -20,7 +20,7 @@ require (
 	k8s.io/apimachinery v0.27.2
 	k8s.io/client-go v0.27.2
 	nhooyr.io/websocket v1.8.7
-	storj.io/drpc v0.0.33
+	storj.io/drpc v0.0.34
 )
 
 require (
