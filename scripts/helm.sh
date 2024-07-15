@@ -51,7 +51,6 @@ while true; do
 	esac
 done
 
-version="${version}"
 if [[ "$version" == "" ]]; then
 	version="$(./scripts/version.sh)"
 fi
