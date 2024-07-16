@@ -19,30 +19,17 @@ jobs:
     name: Build and publish
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Echo Go Cache Paths
-        id: go-cache-paths
-        run: |
-          echo "GOCACHE=$(go env GOCACHE)" >> ${{ runner.os == 'Windows' && '$env:' || '$' }}GITHUB_OUTPUT
-          echo "GOMODCACHE=$(go env GOMODCACHE)" >> ${{ runner.os == 'Windows' && '$env:' || '$' }}GITHUB_OUTPUT
-
-      - name: Go Build Cache
-        uses: actions/cache@v3
-        with:
-          path: ${{ steps.go-cache-paths.outputs.GOCACHE }}
-          key: ${{ runner.os }}-go-build-${{ hashFiles('**/go.**', '**.go') }}
-
-      - uses: actions/setup-go@v5
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
           go-version: "~1.22"
 
       - name: Get Version
         run: echo "version=$(./scripts/version.sh)" >> $GITHUB_OUTPUT
         id: version
-
-      - name: Build
-        run: ./scripts/build.sh
 
       - name: Docker Login
         uses: docker/login-action@v3
@@ -51,15 +38,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push Image
-        run: |
-          VERSION=$(./scripts/version.sh)
-          BASE=ghcr.io/coder/coder-logstream-kube
-          IMAGE=$BASE:$VERSION
-          docker tag coder-logstream-kube:latest $IMAGE
-          docker tag coder-logstream-kube:latest $BASE:latest
-          docker push $IMAGE
-          docker push $BASE:latest
+      - name: Build and Push Docker Image
+        run: ./scripts/build.sh
+        env:
+          CI: true
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
