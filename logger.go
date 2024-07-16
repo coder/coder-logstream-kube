@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/benbjohnson/clock"
 	"github.com/fatih/color"
 	"github.com/google/uuid"
 	appsv1 "k8s.io/api/apps/v1"
@@ -20,6 +19,7 @@ import (
 	"cdr.dev/slog"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/agentsdk"
+	"github.com/coder/quartz"
 
 	// *Never* remove this. Certificates are not bundled as part
 	// of the container, so this is necessary for all connections
@@ -29,7 +29,7 @@ import (
 
 type podEventLoggerOptions struct {
 	client   kubernetes.Interface
-	clock    clock.Clock
+	clock    quartz.Clock
 	coderURL *url.URL
 
 	logger      slog.Logger
@@ -49,7 +49,7 @@ func newPodEventLogger(ctx context.Context, opts podEventLoggerOptions) (*podEve
 		opts.logDebounce = 30 * time.Second
 	}
 	if opts.clock == nil {
-		opts.clock = clock.New()
+		opts.clock = quartz.NewReal()
 	}
 
 	logCh := make(chan agentLog, 512)
@@ -388,7 +388,7 @@ type agentLog struct {
 type logQueuer struct {
 	mu     sync.Mutex
 	logger slog.Logger
-	clock  clock.Clock
+	clock  quartz.Clock
 	q      chan agentLog
 
 	coderURL  *url.URL
@@ -525,7 +525,7 @@ func (l *logQueuer) loggerTimeout(agentToken string) {
 type agentLoggerLifecycle struct {
 	scriptLogger agentsdk.ScriptLogger
 
-	closeTimer *clock.Timer
+	closeTimer *quartz.Timer
 	close      func()
 }
 

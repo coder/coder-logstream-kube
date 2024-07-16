@@ -9,9 +9,9 @@ replace tailscale.com => github.com/coder/tailscale v1.1.1-0.20240702054557-aa55
 
 require (
 	cdr.dev/slog v1.6.2-0.20240126064726-20367d4aede6
-	github.com/benbjohnson/clock v1.3.5
 	github.com/breml/rootcerts v0.2.11
 	github.com/coder/coder/v2 v2.10.1-0.20240703121105-f6639b788f7b
+	github.com/coder/quartz v0.1.0
 	github.com/fatih/color v1.17.0
 	github.com/go-chi/chi/v5 v5.1.0
 	github.com/google/uuid v1.6.0
@@ -61,7 +61,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/charmbracelet/lipgloss v0.8.0 // indirect
 	github.com/coder/pretty v0.0.0-20230908205945-e89ba86370e0 // indirect
-	github.com/coder/quartz v0.1.0 // indirect
 	github.com/coder/retry v1.5.1 // indirect
 	github.com/coder/serpent v0.7.0 // indirect
 	github.com/coder/terraform-provider-coder v0.23.0 // indirect
