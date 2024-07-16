@@ -11,7 +11,7 @@ require (
 	github.com/breml/rootcerts v0.2.11
 	github.com/coder/coder/v2 v2.10.1-0.20240528221537-02c36868b20b
 	github.com/fatih/color v1.17.0
-	github.com/go-chi/chi/v5 v5.0.10
+	github.com/go-chi/chi/v5 v5.1.0
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/yamux v0.1.1
 	github.com/spf13/cobra v1.7.0
