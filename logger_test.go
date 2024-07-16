@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/benbjohnson/clock"
 	"github.com/go-chi/chi/v5"
 	"github.com/hashicorp/yamux"
 	"github.com/stretchr/testify/require"
@@ -30,6 +29,7 @@ import (
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/agentsdk"
 	"github.com/coder/coder/v2/testutil"
+	"github.com/coder/quartz"
 )
 
 func TestReplicaSetEvents(t *testing.T) {
@@ -43,7 +43,7 @@ func TestReplicaSetEvents(t *testing.T) {
 	namespace := "test-namespace"
 	client := fake.NewSimpleClientset()
 
-	cMock := clock.NewMock()
+	cMock := quartz.NewMock(t)
 	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
 		client:      client,
 		coderURL:    agentURL,
@@ -140,7 +140,7 @@ func TestPodEvents(t *testing.T) {
 	namespace := "test-namespace"
 	client := fake.NewSimpleClientset()
 
-	cMock := clock.NewMock()
+	cMock := quartz.NewMock(t)
 	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
 		client:      client,
 		coderURL:    agentURL,
@@ -284,7 +284,7 @@ func Test_logQueuer(t *testing.T) {
 		api := newFakeAgentAPI(t)
 		agentURL, err := url.Parse(api.server.URL)
 		require.NoError(t, err)
-		clock := clock.NewMock()
+		clock := quartz.NewMock(t)
 		ttl := time.Second
 
 		ch := make(chan agentLog)
@@ -300,7 +300,7 @@ func Test_logQueuer(t *testing.T) {
 			},
 		}
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		go lq.work(ctx)
 
@@ -335,7 +335,7 @@ func Test_logQueuer(t *testing.T) {
 		logs = testutil.RequireRecvCtx(ctx, t, api.logs)
 		require.Len(t, logs, 1)
 
-		clock.Add(2 * ttl)
+		clock.Advance(ttl)
 		// wait for the client to disconnect
 		_ = testutil.RequireRecvCtx(ctx, t, api.disconnect)
 	})
