@@ -18,7 +18,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	"cdr.dev/slog"
-	"github.com/coder/coder/v2/agent/proto"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/agentsdk"
 
@@ -427,7 +426,7 @@ func (l *logQueuer) processLog(ctx context.Context, log agentLog) {
 		logger := l.logger.With(slog.F("resource_name", log.resourceName))
 		client.SDK.SetLogger(logger)
 
-		_, err := client.PostLogSource(ctx, agentsdk.PostLogSource{
+		_, err := client.PostLogSource(ctx, agentsdk.PostLogSourceRequest{
 			ID:          sourceUUID,
 			Icon:        "/icon/k8s.png",
 			DisplayName: "Kubernetes",
@@ -443,16 +442,17 @@ func (l *logQueuer) processLog(ctx context.Context, log agentLog) {
 
 		gracefulCtx, gracefulCancel := context.WithCancel(context.Background())
 
-		rpc, err := client.ConnectRPC(gracefulCtx)
+		// connect to Agent v2.0 API, since we don't need features added later.
+		// This maximizes compatibility.
+		arpc, err := client.ConnectRPC20(gracefulCtx)
 		if err != nil {
 			logger.Error(ctx, "drpc connect", slog.Error(err))
 			gracefulCancel()
 			return
 		}
-		arpc := proto.NewDRPCAgentClient(rpc)
 		go func() {
 			err := ls.SendLoop(gracefulCtx, arpc)
-			// if the send loop exits on it's own without the context
+			// if the send loop exits on its own without the context
 			// canceling, timeout the logger and force it to recreate.
 			if err != nil && ctx.Err() == nil {
 				l.loggerTimeout(log.agentToken)
@@ -485,7 +485,7 @@ func (l *logQueuer) processLog(ctx context.Context, log agentLog) {
 					logger.Warn(gracefulCtx, "timeout reached while waiting for log queue to empty")
 				}
 
-				_ = rpc.Close()
+				_ = arpc.DRPCConn().Close()
 				client.SDK.HTTPClient.CloseIdleConnections()
 			},
 		}

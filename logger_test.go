@@ -347,7 +347,7 @@ func newFakeAgentAPI(t *testing.T) *fakeAgentAPI {
 	fakeAPI := &fakeAgentAPI{
 		disconnect: make(chan struct{}),
 		logs:       make(chan []*proto.Log),
-		logSource:  make(chan agentsdk.PostLogSource),
+		logSource:  make(chan agentsdk.PostLogSourceRequest),
 	}
 	err := proto.DRPCRegisterAgent(mux, fakeAPI)
 	require.NoError(t, err)
@@ -403,39 +403,39 @@ func newFakeAgentAPI(t *testing.T) *fakeAgentAPI {
 type fakeAgentAPI struct {
 	disconnect chan struct{}
 	logs       chan []*proto.Log
-	logSource  chan agentsdk.PostLogSource
+	logSource  chan agentsdk.PostLogSourceRequest
 	server     *httptest.Server
 }
 
-func (f *fakeAgentAPI) GetManifest(_ context.Context, _ *proto.GetManifestRequest) (*proto.Manifest, error) {
+func (*fakeAgentAPI) GetManifest(_ context.Context, _ *proto.GetManifestRequest) (*proto.Manifest, error) {
 	panic("not implemented")
 }
 
-func (f *fakeAgentAPI) GetServiceBanner(_ context.Context, _ *proto.GetServiceBannerRequest) (*proto.ServiceBanner, error) {
+func (*fakeAgentAPI) GetServiceBanner(_ context.Context, _ *proto.GetServiceBannerRequest) (*proto.ServiceBanner, error) {
 	panic("not implemented")
 }
 
-func (f *fakeAgentAPI) UpdateStats(_ context.Context, _ *proto.UpdateStatsRequest) (*proto.UpdateStatsResponse, error) {
+func (*fakeAgentAPI) UpdateStats(_ context.Context, _ *proto.UpdateStatsRequest) (*proto.UpdateStatsResponse, error) {
 	panic("not implemented")
 }
 
-func (f *fakeAgentAPI) UpdateLifecycle(_ context.Context, _ *proto.UpdateLifecycleRequest) (*proto.Lifecycle, error) {
+func (*fakeAgentAPI) UpdateLifecycle(_ context.Context, _ *proto.UpdateLifecycleRequest) (*proto.Lifecycle, error) {
 	panic("not implemented")
 }
 
-func (f *fakeAgentAPI) BatchUpdateAppHealths(_ context.Context, _ *proto.BatchUpdateAppHealthRequest) (*proto.BatchUpdateAppHealthResponse, error) {
+func (*fakeAgentAPI) BatchUpdateAppHealths(_ context.Context, _ *proto.BatchUpdateAppHealthRequest) (*proto.BatchUpdateAppHealthResponse, error) {
 	panic("not implemented")
 }
 
-func (f *fakeAgentAPI) UpdateStartup(_ context.Context, _ *proto.UpdateStartupRequest) (*proto.Startup, error) {
+func (*fakeAgentAPI) UpdateStartup(_ context.Context, _ *proto.UpdateStartupRequest) (*proto.Startup, error) {
 	panic("not implemented")
 }
 
-func (f *fakeAgentAPI) BatchUpdateMetadata(_ context.Context, _ *proto.BatchUpdateMetadataRequest) (*proto.BatchUpdateMetadataResponse, error) {
+func (*fakeAgentAPI) BatchUpdateMetadata(_ context.Context, _ *proto.BatchUpdateMetadataRequest) (*proto.BatchUpdateMetadataResponse, error) {
 	panic("not implemented")
 }
 
-func (f *fakeAgentAPI) GetNotificationBanners(_ context.Context, _ *proto.GetNotificationBannersRequest) (*proto.GetNotificationBannersResponse, error) {
+func (*fakeAgentAPI) GetAnnouncementBanners(_ context.Context, _ *proto.GetAnnouncementBannersRequest) (*proto.GetAnnouncementBannersResponse, error) {
 	panic("not implemented")
 }
 
@@ -445,7 +445,7 @@ func (f *fakeAgentAPI) BatchCreateLogs(_ context.Context, req *proto.BatchCreate
 }
 
 func (f *fakeAgentAPI) PostLogSource(w http.ResponseWriter, r *http.Request) {
-	var req agentsdk.PostLogSource
+	var req agentsdk.PostLogSourceRequest
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
 		fmt.Println("failed to decode:", err.Error())
