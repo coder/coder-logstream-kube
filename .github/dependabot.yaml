@@ -8,7 +8,8 @@ updates:
       interval: "weekly"
     groups:
       k8s:
-        pattern: "k8s.io/*"
+        pattern: 
+          - "k8s.io/*"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
