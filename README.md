@@ -26,13 +26,13 @@ helm install coder-logstream-kube coder-logstream-kube/coder-logstream-kube \
 
 > **Note**
 > For additional customization (such as customizing the image, pull secrets, annotations, etc.), you can use the
-> [values.yaml](https://github.com/coder/coder-logstream-kube/blob/main/values.yaml) file directly.
+> [values.yaml](helm/values.yaml) file directly.
 
 Your Coder template should be using a `kubernetes_deployment` resource with `wait_for_rollout` set to `false`.
 
 ```hcl
 resource "kubernetes_deployment" "hello_world" {
-  count = data.coder_workspace.me.start_count  
+  count = data.coder_workspace.me.start_count
   wait_for_rollout = false
   ...
 }
