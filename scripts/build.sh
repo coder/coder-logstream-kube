@@ -40,5 +40,10 @@ else
     VERSION=$(../scripts/version.sh)
     BASE=ghcr.io/coder/coder-logstream-kube
     IMAGE=$BASE:$VERSION
-    docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t "$IMAGE" -t $BASE:latest --push .
+    # if version contains "rc" skip pushing to latest
+    if [[ $VERSION == *"rc"* ]]; then
+        docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t "$IMAGE" --push .
+    else
+        docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t "$IMAGE" -t $BASE:latest --push .
+    fi
 fi
