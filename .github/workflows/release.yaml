@@ -69,6 +69,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ github.token }}
+          tag_name: ${{ github.ref_name }}
           files: build/${{ steps.version.outputs.version }}.tgz
           prerelease: ${{ contains(github.ref, 'rc') }}
           generate_release_notes: true
