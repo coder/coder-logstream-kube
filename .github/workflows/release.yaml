@@ -71,3 +71,4 @@ jobs:
           token: ${{ github.token }}
           files: build/${{ steps.version.outputs.version }}.tgz
           prerelease: ${{ contains(github.ref, 'rc') }}
+          generate_release_notes: true
