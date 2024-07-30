@@ -65,22 +65,9 @@ jobs:
           gsutil -h "Cache-Control:no-cache,max-age=0" cp build/helm/${version}.tgz gs://helm.coder.com/logstream-kube
           gsutil -h "Cache-Control:no-cache,max-age=0" cp build/helm/index.yaml gs://helm.coder.com/logstream-kube
 
-      - name: Create Release
-        uses: actions/create-release@v1
-        id: create_release
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+      - name: Create and upload release
+        uses: softprops/action-gh-release@v2
         with:
-          release_name: ${{ steps.version.outputs.version }}
-          tag_name: ${{ github.ref }}
-          prerelease: ${{ contains(github.ref, 'rc') }} # Release candidates are marked as pre-releases
-
-      - name: Upload Helm Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: build/${{ steps.version.outputs.version }}.tgz
-          asset_name: helm.tar.gz
-          asset_content_type: application/gzip
+          token: ${{ github.token }}
+          files: build/${{ steps.version.outputs.version }}.tgz
+          prerelease: ${{ contains(github.ref, 'rc') }}
