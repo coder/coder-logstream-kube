@@ -77,9 +77,9 @@ jobs:
             echo "Creating release $version"
             # if version contains -rc, publish as a pre-release and not latest
             if [[ $version == *-rc* ]]; then
-              gh release create $version -t $version --generate-notes --prerelease --latest=false --verify-tag  build/${version}.tgz
+              gh release create $version -t $version --generate-notes --prerelease --latest=false --verify-tag  build/${version}.tgz#helm.tar.gz
             else
-              gh release create $version -t $version --generate-notes --verify-tag  build/${version}.tgz
+              gh release create $version -t $version --generate-notes --verify-tag  build/${version}.tgz#helm.tar.gz
             fi
           fi
         env:
