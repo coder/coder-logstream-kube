@@ -33,7 +33,7 @@ fi
 # Ensure the builder is bootstrapped and ready to use
 docker buildx inspect --bootstrap &>/dev/null
 
-# Build
+# Build and push the image
 if [ "$CI" = "false" ]; then
     docker buildx build --platform linux/"$current" -t coder-logstream-kube --load .
 else
