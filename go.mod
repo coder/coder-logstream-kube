@@ -21,7 +21,7 @@ require (
 	k8s.io/api v0.30.3
 	k8s.io/apimachinery v0.30.3
 	k8s.io/client-go v0.30.3
-	nhooyr.io/websocket v1.8.11
+	nhooyr.io/websocket v1.8.17
 	storj.io/drpc v0.0.34
 )
 
