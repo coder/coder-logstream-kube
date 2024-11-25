@@ -20,7 +20,7 @@ require (
 	github.com/stretchr/testify v1.9.0
 	k8s.io/api v0.31.3
 	k8s.io/apimachinery v0.31.3
-	k8s.io/client-go v0.31.1
+	k8s.io/client-go v0.31.3
 	nhooyr.io/websocket v1.8.11
 	storj.io/drpc v0.0.34
 )
