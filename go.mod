@@ -15,7 +15,7 @@ require (
 	github.com/fatih/color v1.18.0
 	github.com/go-chi/chi/v5 v5.1.0
 	github.com/google/uuid v1.6.0
-	github.com/hashicorp/yamux v0.1.1
+	github.com/hashicorp/yamux v0.1.2
 	github.com/spf13/cobra v1.7.0
 	github.com/stretchr/testify v1.10.0
 	k8s.io/api v0.31.3
