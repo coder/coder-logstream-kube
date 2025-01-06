@@ -11,7 +11,7 @@ require (
 	cdr.dev/slog v1.6.2-0.20240126064726-20367d4aede6
 	github.com/breml/rootcerts v0.2.19
 	github.com/coder/coder/v2 v2.10.1-0.20240703121105-f6639b788f7b
-	github.com/coder/quartz v0.1.2
+	github.com/coder/quartz v0.1.3
 	github.com/fatih/color v1.18.0
 	github.com/go-chi/chi/v5 v5.2.0
 	github.com/google/uuid v1.6.0
