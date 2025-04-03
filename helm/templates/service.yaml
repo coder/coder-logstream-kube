@@ -85,6 +85,10 @@ spec:
             - name: SSL_CERT_DIR
               value: {{ .Values.image.sslCertDir }}
             {{- end }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- if .Values.volumeMounts }}
           volumeMounts: {{- toYaml .Values.volumeMounts | nindent 12 }}
           {{- end }}
