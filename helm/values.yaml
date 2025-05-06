@@ -89,3 +89,15 @@ tolerations:
 # labels -- The pod labels for coder-logstream-kube. See:
 # https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/
 labels: {}
+
+# securityContext -- Container-level security context
+# See: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
+securityContext: {}
+  # allowPrivilegeEscalation: false
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # seccompProfile:
+  #   type: RuntimeDefault
