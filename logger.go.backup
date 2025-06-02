@@ -103,29 +103,14 @@ func (p *podEventLogger) init() error {
 
 	go p.lq.work(p.ctx)
 
-	// Create informer factory options based on namespace configuration
-	var podFactoryOptions []informers.SharedInformerOption
-	var eventFactoryOptions []informers.SharedInformerOption
-
-	// If namespace is empty, watch all namespaces. Otherwise, watch the specific namespace.
-	if p.namespace != "" {
-		podFactoryOptions = append(podFactoryOptions, informers.WithNamespace(p.namespace))
-		eventFactoryOptions = append(eventFactoryOptions, informers.WithNamespace(p.namespace))
-	}
-
-	// Add field and label selector options for pods
-	if p.fieldSelector != "" || p.labelSelector != "" {
-		podFactoryOptions = append(podFactoryOptions, informers.WithTweakListOptions(func(lo *v1.ListOptions) {
-			lo.FieldSelector = p.fieldSelector
-			lo.LabelSelector = p.labelSelector
-		}))
-	}
-
-	podFactory := informers.NewSharedInformerFactoryWithOptions(p.client, 0, podFactoryOptions...)
+	podFactory := informers.NewSharedInformerFactoryWithOptions(p.client, 0, informers.WithNamespace(p.namespace), informers.WithTweakListOptions(func(lo *v1.ListOptions) {
+		lo.FieldSelector = p.fieldSelector
+		lo.LabelSelector = p.labelSelector
+	}))
 	eventFactory := podFactory
 	if p.fieldSelector != "" || p.labelSelector != "" {
 		// Events cannot filter on labels and fields!
-		eventFactory = informers.NewSharedInformerFactoryWithOptions(p.client, 0, eventFactoryOptions...)
+		eventFactory = informers.NewSharedInformerFactoryWithOptions(p.client, 0, informers.WithNamespace(p.namespace))
 	}
 
 	// We listen for Pods and Events in the informer factory.
@@ -290,14 +275,9 @@ func (p *podEventLogger) init() error {
 		return fmt.Errorf("register event handler: %w", err)
 	}
 
-	namespaceMsg := p.namespace
-	if namespaceMsg == "" {
-		namespaceMsg = "all namespaces"
-	}
-
 	p.logger.Info(p.ctx, "listening for pod events",
 		slog.F("coder_url", p.coderURL.String()),
-		slog.F("namespace", namespaceMsg),
+		slog.F("namespace", p.namespace),
 		slog.F("field_selector", p.fieldSelector),
 		slog.F("label_selector", p.labelSelector),
 	)
@@ -417,118 +397,166 @@ type logQueuer struct {
 	logCache  logCache
 }
 
+func (l *logQueuer) work(ctx context.Context) {
+	for ctx.Err() == nil {
+		select {
+		case log := <-l.q:
+			switch log.op {
+			case opLog:
+				l.processLog(ctx, log)
+			case opDelete:
+				l.processDelete(log)
+			}
+
+		case <-ctx.Done():
+			return
+		}
+
+	}
+}
+
+func (l *logQueuer) processLog(ctx context.Context, log agentLog) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	queuedLogs := l.logCache.push(log)
+	lgr, ok := l.loggers[log.agentToken]
+	if !ok {
+		client := agentsdk.New(l.coderURL)
+		client.SetSessionToken(log.agentToken)
+		logger := l.logger.With(slog.F("resource_name", log.resourceName))
+		client.SDK.SetLogger(logger)
+
+		_, err := client.PostLogSource(ctx, agentsdk.PostLogSourceRequest{
+			ID:          sourceUUID,
+			Icon:        "/icon/k8s.png",
+			DisplayName: "Kubernetes",
+		})
+		if err != nil {
+			// This shouldn't fail sending the log, as it only affects how they
+			// appear.
+			logger.Error(ctx, "post log source", slog.Error(err))
+		}
+
+		ls := agentsdk.NewLogSender(logger)
+		sl := ls.GetScriptLogger(sourceUUID)
+
+		gracefulCtx, gracefulCancel := context.WithCancel(context.Background())
+
+		// connect to Agent v2.0 API, since we don't need features added later.
+		// This maximizes compatibility.
+		arpc, err := client.ConnectRPC20(gracefulCtx)
+		if err != nil {
+			logger.Error(ctx, "drpc connect", slog.Error(err))
+			gracefulCancel()
+			return
+		}
+		go func() {
+			err := ls.SendLoop(gracefulCtx, arpc)
+			// if the send loop exits on its own without the context
+			// canceling, timeout the logger and force it to recreate.
+			if err != nil && ctx.Err() == nil {
+				l.loggerTimeout(log.agentToken)
+			}
+		}()
+
+		closeTimer := l.clock.AfterFunc(l.loggerTTL, func() {
+			logger.Info(ctx, "logger timeout firing")
+			l.loggerTimeout(log.agentToken)
+		})
+		lifecycle := agentLoggerLifecycle{
+			scriptLogger: sl,
+			close: func() {
+				// We could be stopping for reasons other than the timeout. If
+				// so, stop the timer.
+				closeTimer.Stop()
+				defer gracefulCancel()
+				timeout := l.clock.AfterFunc(5*time.Second, gracefulCancel)
+				defer timeout.Stop()
+				logger.Info(ctx, "logger closing")
+
+				if err := sl.Flush(gracefulCtx); err != nil {
+					// ctx err
+					logger.Warn(gracefulCtx, "timeout reached while flushing")
+					return
+				}
+
+				if err := ls.WaitUntilEmpty(gracefulCtx); err != nil {
+					// ctx err
+					logger.Warn(gracefulCtx, "timeout reached while waiting for log queue to empty")
+				}
+
+				_ = arpc.DRPCConn().Close()
+				client.SDK.HTTPClient.CloseIdleConnections()
+			},
+		}
+		lifecycle.closeTimer = closeTimer
+		l.loggers[log.agentToken] = lifecycle
+		lgr = lifecycle
+	}
+
+	lgr.resetCloseTimer(l.loggerTTL)
+	_ = lgr.scriptLogger.Send(ctx, queuedLogs...)
+	l.logCache.delete(log.agentToken)
+}
+
+func (l *logQueuer) processDelete(log agentLog) {
+	l.mu.Lock()
+	lgr, ok := l.loggers[log.agentToken]
+	if ok {
+		delete(l.loggers, log.agentToken)
+
+	}
+	l.mu.Unlock()
+
+	if ok {
+		// close this async, no one else will have a handle to it since we've
+		// deleted from the map
+		go lgr.close()
+	}
+}
+
+func (l *logQueuer) loggerTimeout(agentToken string) {
+	l.q <- agentLog{
+		op:         opDelete,
+		agentToken: agentToken,
+	}
+}
+
 type agentLoggerLifecycle struct {
-	logger agentsdk.AgentLogWriter
-	timer  *quartz.Timer
+	scriptLogger agentsdk.ScriptLogger
+
+	closeTimer *quartz.Timer
+	close      func()
+}
+
+func (l *agentLoggerLifecycle) resetCloseTimer(ttl time.Duration) {
+	if !l.closeTimer.Reset(ttl) {
+		// If the timer had already fired and we made it active again, stop the
+		// timer. We don't want it to run twice.
+		l.closeTimer.Stop()
+	}
+}
+
+func newColor(value ...color.Attribute) *color.Color {
+	c := color.New(value...)
+	c.EnableColor()
+	return c
 }
 
 type logCache struct {
-	mu   sync.Mutex
 	logs map[string][]agentsdk.Log
 }
 
-func (lc *logCache) add(token string, log agentsdk.Log) {
-	lc.mu.Lock()
-	defer lc.mu.Unlock()
-	lc.logs[token] = append(lc.logs[token], log)
-}
-
-func (lc *logCache) flush(token string) []agentsdk.Log {
-	lc.mu.Lock()
-	defer lc.mu.Unlock()
-	logs := lc.logs[token]
-	delete(lc.logs, token)
+func (l *logCache) push(log agentLog) []agentsdk.Log {
+	logs, ok := l.logs[log.agentToken]
+	if !ok {
+		logs = make([]agentsdk.Log, 0, 1)
+	}
+	logs = append(logs, log.log)
+	l.logs[log.agentToken] = logs
 	return logs
 }
 
-func (lq *logQueuer) work(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case log := <-lq.q:
-			switch log.op {
-			case opLog:
-				lq.handleLog(ctx, log)
-			case opDelete:
-				lq.handleDelete(log.agentToken)
-			}
-		}
-	}
-}
-
-func (lq *logQueuer) handleLog(ctx context.Context, log agentLog) {
-	lq.mu.Lock()
-	defer lq.mu.Unlock()
-
-	lifecycle, ok := lq.loggers[log.agentToken]
-	if !ok {
-		// Create a new logger for this agent token
-		client := codersdk.New(lq.coderURL)
-		agentClient := agentsdk.New(client.URL)
-		agentClient.SetSessionToken(log.agentToken)
-
-		logger, err := agentClient.PatchLogs(ctx, agentsdk.PatchLogsRequest{
-			LogSourceID: sourceUUID,
-		})
-		if err != nil {
-			lq.logger.Error(ctx, "failed to create agent logger", slog.Error(err))
-			return
-		}
-
-		timer := lq.clock.AfterFunc(lq.loggerTTL, func() {
-			lq.mu.Lock()
-			defer lq.mu.Unlock()
-			lq.deleteLogger(log.agentToken)
-		})
-
-		lifecycle = agentLoggerLifecycle{
-			logger: logger,
-			timer:  timer,
-		}
-		lq.loggers[log.agentToken] = lifecycle
-	} else {
-		// Reset the timer for existing logger
-		lifecycle.timer.Reset(lq.loggerTTL)
-	}
-
-	// Add log to cache
-	lq.logCache.add(log.agentToken, log.log)
-
-	// Send cached logs
-	logs := lq.logCache.flush(log.agentToken)
-	if len(logs) > 0 {
-		err := lifecycle.logger.Write(ctx, logs)
-		if err != nil {
-			lq.logger.Error(ctx, "failed to write logs", slog.Error(err))
-			// Re-add logs to cache on failure
-			for _, l := range logs {
-				lq.logCache.add(log.agentToken, l)
-			}
-		}
-	}
-}
-
-func (lq *logQueuer) handleDelete(token string) {
-	lq.mu.Lock()
-	defer lq.mu.Unlock()
-	lq.deleteLogger(token)
-}
-
-func (lq *logQueuer) deleteLogger(token string) {
-	lifecycle, ok := lq.loggers[token]
-	if !ok {
-		return
-	}
-
-	lifecycle.timer.Stop()
-	_ = lifecycle.logger.Close()
-	delete(lq.loggers, token)
-	lq.logCache.flush(token) // Clear any cached logs
-}
-
-func newColor(attrs ...color.Attribute) *color.Color {
-	c := color.New(attrs...)
-	c.EnableColor()
-	return c
+func (l *logCache) delete(token string) {
+	delete(l.logs, token)
 }

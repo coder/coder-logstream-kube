@@ -1,4 +1,3 @@
-{{- if .Values.namespace }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -11,6 +10,13 @@ rules:
   resources: ["replicasets", "events"]
   verbs: ["get", "watch", "list"]
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.serviceAccount.name | quote }}
+  annotations: {{ toYaml .Values.serviceAccount.annotations | nindent 4 }}
+  labels: {{ toYaml .Values.serviceAccount.labels | nindent 4 }}
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
@@ -22,39 +28,6 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: {{ .Values.serviceAccount.name | quote }}
-{{- else }}
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: coder-logstream-kube-clusterrole
-rules:
-- apiGroups: [""]
-  resources: ["pods", "events"]
-  verbs: ["get", "watch", "list"]
-- apiGroups: ["apps"]
-  resources: ["replicasets", "events"]
-  verbs: ["get", "watch", "list"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: coder-logstream-kube-clusterrolebinding
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: coder-logstream-kube-clusterrole
-subjects:
-- kind: ServiceAccount
-  name: {{ .Values.serviceAccount.name | quote }}
-  namespace: {{ .Release.Namespace }}
-{{- end }}
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: {{ .Values.serviceAccount.name | quote }}
-  annotations: {{ toYaml .Values.serviceAccount.annotations | nindent 4 }}
-  labels: {{ toYaml .Values.serviceAccount.labels | nindent 4 }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -102,10 +75,8 @@ spec:
           env:
             - name: CODER_URL
               value: {{ .Values.url }}
-            {{- if .Values.namespace }}
             - name: CODER_NAMESPACE
-              value: {{ .Values.namespace }}
-            {{- end }}
+              value: {{  .Values.namespace | default .Release.Namespace }}
             {{- if .Values.image.sslCertFile }}
             - name: SSL_CERT_FILE
               value: {{ .Values.image.sslCertFile }}
@@ -124,4 +95,3 @@ spec:
       {{- if .Values.volumes }}
       volumes: {{- toYaml .Values.volumes | nindent 8 }}
       {{- end }}
-

@@ -10,7 +10,6 @@ Stream Kubernetes Pod events to the Coder startup logs.
 - Easily determine the reason for a pod provision failure, or why a pod is stuck in a pending state.
 - Visibility into when pods are OOMKilled, or when they are evicted.
 - Filter by namespace, field selector, and label selector to reduce Kubernetes API load.
-- Support for watching pods across multiple namespaces or all namespaces.
 
 ![Log Stream](./scripts/demo.png)
 
@@ -24,27 +23,6 @@ helm install coder-logstream-kube coder-logstream-kube/coder-logstream-kube \
     --namespace coder \
     --set url=<your-coder-url-including-http-or-https>
 ```
-
-### Multi-Namespace Support
-
-By default, `coder-logstream-kube` will watch pods in all namespaces. This is useful for deployments where workspaces are spread across multiple namespaces (e.g., per-user namespaces).
-
-To watch all namespaces (default behavior):
-```console
-helm install coder-logstream-kube coder-logstream-kube/coder-logstream-kube \
-    --namespace coder \
-    --set url=<your-coder-url>
-```
-
-To watch a specific namespace only:
-```console
-helm install coder-logstream-kube coder-logstream-kube/coder-logstream-kube \
-    --namespace coder \
-    --set url=<your-coder-url> \
-    --set namespace=<target-namespace>
-```
-
-**Important**: When watching all namespaces, the Helm chart will create a `ClusterRole` and `ClusterRoleBinding` to provide the necessary cluster-wide permissions. When watching a specific namespace, it will create a `Role` and `RoleBinding` scoped to that namespace.
 
 > **Note**
 > For additional customization (such as customizing the image, pull secrets, annotations, etc.), you can use the
@@ -67,8 +45,6 @@ This ensures all pod events will be sent during initialization and startup.
 Kubernetes provides an [informers](https://pkg.go.dev/k8s.io/client-go/informers) API that streams pod and event data from the API server.
 
 `coder-logstream-kube` listens for pod creation events with containers that have the `CODER_AGENT_TOKEN` environment variable set. All pod events are streamed as logs to the Coder API using the agent token for authentication.
-
-When no namespace is specified (or the `CODER_NAMESPACE` environment variable is empty), the informers will watch all namespaces in the cluster. When a specific namespace is provided, the informers are scoped to that namespace only.
 
 ## Custom Certificates
 
