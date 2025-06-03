@@ -459,3 +459,52 @@ func (f *fakeAgentAPI) PostLogSource(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("failed to encode:", err.Error())
 	}
 }
+
+func TestParseNamespaces(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{
+			name:     "empty string",
+			input:    "",
+			expected: []string{},
+		},
+		{
+			name:     "single namespace",
+			input:    "default",
+			expected: []string{"default"},
+		},
+		{
+			name:     "multiple namespaces",
+			input:    "ns1,ns2,ns3",
+			expected: []string{"ns1", "ns2", "ns3"},
+		},
+		{
+			name:     "namespaces with spaces",
+			input:    "ns1, ns2 , ns3",
+			expected: []string{"ns1", "ns2", "ns3"},
+		},
+		{
+			name:     "namespaces with empty values",
+			input:    "ns1,,ns2,",
+			expected: []string{"ns1", "ns2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseNamespaces(tt.input)
+			if len(result) != len(tt.expected) {
+				t.Errorf("parseNamespaces(%q) returned %d namespaces, expected %d", tt.input, len(result), len(tt.expected))
+				return
+			}
+			for i, ns := range result {
+				if ns != tt.expected[i] {
+					t.Errorf("parseNamespaces(%q)[%d] = %q, expected %q", tt.input, i, ns, tt.expected[i])
+				}
+			}
+		})
+	}
+}
