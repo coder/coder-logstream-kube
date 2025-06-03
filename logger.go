@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,7 +37,7 @@ type podEventLoggerOptions struct {
 	logDebounce time.Duration
 
 	// The following fields are optional!
-	namespace     string
+	namespaces    string
 	fieldSelector string
 	labelSelector string
 }
@@ -95,6 +96,23 @@ type podEventLogger struct {
 	lq    *logQueuer
 }
 
+// parseNamespaces parses the comma-separated namespaces string and returns a slice of namespace names.
+// If the input is empty, it returns an empty slice indicating all namespaces should be watched.
+func parseNamespaces(namespaces string) []string {
+	if namespaces == "" {
+		return []string{}
+	}
+
+	var result []string
+	for _, ns := range strings.Split(namespaces, ",") {
+		ns = strings.TrimSpace(ns)
+		if ns != "" {
+			result = append(result, ns)
+		}
+	}
+	return result
+}
+
 // init starts the informer factory and registers event handlers.
 func (p *podEventLogger) init() error {
 	// We only track events that happen after the reporter starts.
@@ -103,14 +121,49 @@ func (p *podEventLogger) init() error {
 
 	go p.lq.work(p.ctx)
 
-	podFactory := informers.NewSharedInformerFactoryWithOptions(p.client, 0, informers.WithNamespace(p.namespace), informers.WithTweakListOptions(func(lo *v1.ListOptions) {
-		lo.FieldSelector = p.fieldSelector
-		lo.LabelSelector = p.labelSelector
-	}))
+	namespaceList := parseNamespaces(p.namespaces)
+
+	// If no namespaces specified, watch all namespaces
+	if len(namespaceList) == 0 {
+		return p.initForNamespace("", startTime)
+	}
+
+	// Watch specific namespaces
+	for _, namespace := range namespaceList {
+		if err := p.initForNamespace(namespace, startTime); err != nil {
+			return fmt.Errorf("init for namespace %s: %w", namespace, err)
+		}
+	}
+
+	return nil
+}
+
+// initForNamespace initializes informers for a specific namespace.
+// If namespace is empty, it watches all namespaces.
+func (p *podEventLogger) initForNamespace(namespace string, startTime time.Time) error {
+	var podFactory informers.SharedInformerFactory
+	if namespace == "" {
+		// Watch all namespaces
+		podFactory = informers.NewSharedInformerFactoryWithOptions(p.client, 0, informers.WithTweakListOptions(func(lo *v1.ListOptions) {
+			lo.FieldSelector = p.fieldSelector
+			lo.LabelSelector = p.labelSelector
+		}))
+	} else {
+		// Watch specific namespace
+		podFactory = informers.NewSharedInformerFactoryWithOptions(p.client, 0, informers.WithNamespace(namespace), informers.WithTweakListOptions(func(lo *v1.ListOptions) {
+			lo.FieldSelector = p.fieldSelector
+			lo.LabelSelector = p.labelSelector
+		}))
+	}
+
 	eventFactory := podFactory
 	if p.fieldSelector != "" || p.labelSelector != "" {
 		// Events cannot filter on labels and fields!
-		eventFactory = informers.NewSharedInformerFactoryWithOptions(p.client, 0, informers.WithNamespace(p.namespace))
+		if namespace == "" {
+			eventFactory = informers.NewSharedInformerFactoryWithOptions(p.client, 0)
+		} else {
+			eventFactory = informers.NewSharedInformerFactoryWithOptions(p.client, 0, informers.WithNamespace(namespace))
+		}
 	}
 
 	// We listen for Pods and Events in the informer factory.
@@ -200,37 +253,31 @@ func (p *podEventLogger) init() error {
 
 					p.sendLog(replicaSet.Name, env.Value, agentsdk.Log{
 						CreatedAt: time.Now(),
-						Output:    fmt.Sprintf("🐳 %s: %s", newColor(color.Bold).Sprint("Queued pod from ReplicaSet"), replicaSet.Name),
+						Output:    fmt.Sprintf("📦 %s: %s", newColor(color.Bold).Sprint("Created replicaset"), replicaSet.Name),
 						Level:     codersdk.LogLevelInfo,
 					})
 				}
 			}
 			if registered {
-				p.logger.Info(p.ctx, "registered agent pod from ReplicaSet", slog.F("name", replicaSet.Name))
+				p.logger.Info(p.ctx, "registered agent replicaset", slog.F("name", replicaSet.Name), slog.F("namespace", replicaSet.Namespace))
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			replicaSet, ok := obj.(*appsv1.ReplicaSet)
 			if !ok {
-				p.errChan <- fmt.Errorf("unexpected replica set delete object type: %T", obj)
+				p.errChan <- fmt.Errorf("unexpected replicaset delete object type: %T", obj)
 				return
 			}
 
 			tokens := p.tc.deleteReplicaSetToken(replicaSet.Name)
-			if len(tokens) == 0 {
-				return
-			}
-
 			for _, token := range tokens {
 				p.sendLog(replicaSet.Name, token, agentsdk.Log{
 					CreatedAt: time.Now(),
-					Output:    fmt.Sprintf("🗑️ %s: %s", newColor(color.Bold).Sprint("Deleted ReplicaSet"), replicaSet.Name),
+					Output:    fmt.Sprintf("🗑️ %s: %s", newColor(color.Bold).Sprint("Deleted replicaset"), replicaSet.Name),
 					Level:     codersdk.LogLevelError,
 				})
-				p.sendDelete(token)
 			}
-
-			p.logger.Info(p.ctx, "unregistered ReplicaSet", slog.F("name", replicaSet.Name))
+			p.logger.Info(p.ctx, "unregistered agent replicaset", slog.F("name", replicaSet.Name))
 		},
 	})
 	if err != nil {
@@ -250,24 +297,32 @@ func (p *podEventLogger) init() error {
 				return
 			}
 
+			// We only care about events for pods and replicasets.
 			var tokens []string
 			switch event.InvolvedObject.Kind {
 			case "Pod":
 				tokens = p.tc.getPodTokens(event.InvolvedObject.Name)
 			case "ReplicaSet":
 				tokens = p.tc.getReplicaSetTokens(event.InvolvedObject.Name)
+			default:
+				return
 			}
+
 			if len(tokens) == 0 {
 				return
 			}
 
+			level := codersdk.LogLevelInfo
+			if event.Type == "Warning" {
+				level = codersdk.LogLevelWarn
+			}
+
 			for _, token := range tokens {
 				p.sendLog(event.InvolvedObject.Name, token, agentsdk.Log{
-					CreatedAt: time.Now(),
-					Output:    newColor(color.FgWhite).Sprint(event.Message),
-					Level:     codersdk.LogLevelInfo,
+					CreatedAt: event.CreationTimestamp.Time,
+					Output:    fmt.Sprintf("⚡ %s: %s", newColor(color.Bold).Sprint(event.Reason), event.Message),
+					Level:     level,
 				})
-				p.logger.Info(p.ctx, "sending log", slog.F("pod", event.InvolvedObject.Name), slog.F("message", event.Message))
 			}
 		},
 	})
@@ -275,45 +330,38 @@ func (p *podEventLogger) init() error {
 		return fmt.Errorf("register event handler: %w", err)
 	}
 
-	p.logger.Info(p.ctx, "listening for pod events",
-		slog.F("coder_url", p.coderURL.String()),
-		slog.F("namespace", p.namespace),
-		slog.F("field_selector", p.fieldSelector),
-		slog.F("label_selector", p.labelSelector),
-	)
-	podFactory.Start(p.stopChan)
-	if podFactory != eventFactory {
-		eventFactory.Start(p.stopChan)
+	go podFactory.Start(p.ctx.Done())
+	if eventFactory != podFactory {
+		go eventFactory.Start(p.ctx.Done())
 	}
+
 	return nil
 }
 
-var sourceUUID = uuid.MustParse("cabdacf8-7c90-425c-9815-cae3c75d1169")
-
-// loggerForToken returns a logger for the given pod name and agent token.
-// If a logger already exists for the token, it's returned. Otherwise a new
-// logger is created and returned. It assumes a lock to p.mutex is already being
-// held.
-func (p *podEventLogger) sendLog(resourceName, token string, log agentsdk.Log) {
-	p.logCh <- agentLog{
-		op:           opLog,
-		resourceName: resourceName,
-		agentToken:   token,
-		log:          log,
+func (p *podEventLogger) sendLog(name, token string, log agentsdk.Log) {
+	select {
+	case p.logCh <- agentLog{
+		name:  name,
+		token: token,
+		log:   log,
+	}:
+	case <-p.ctx.Done():
 	}
 }
 
 func (p *podEventLogger) sendDelete(token string) {
-	p.logCh <- agentLog{
-		op:         opDelete,
-		agentToken: token,
+	select {
+	case p.logCh <- agentLog{
+		token:  token,
+		delete: true,
+	}:
+	case <-p.ctx.Done():
 	}
 }
 
 func (p *podEventLogger) Close() error {
 	p.cancelFunc()
 	close(p.stopChan)
-	close(p.errChan)
 	return nil
 }
 
@@ -323,240 +371,224 @@ type tokenCache struct {
 	replicaSets map[string][]string
 }
 
-func (t *tokenCache) setPodToken(name, token string) []string { return t.set(t.pods, name, token) }
-func (t *tokenCache) getPodTokens(name string) []string       { return t.get(t.pods, name) }
-func (t *tokenCache) deletePodToken(name string) []string     { return t.delete(t.pods, name) }
+func (tc *tokenCache) setPodToken(name, token string) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
 
-func (t *tokenCache) setReplicaSetToken(name, token string) []string {
-	return t.set(t.replicaSets, name, token)
-}
-func (t *tokenCache) getReplicaSetTokens(name string) []string { return t.get(t.replicaSets, name) }
-func (t *tokenCache) deleteReplicaSetToken(name string) []string {
-	return t.delete(t.replicaSets, name)
-}
-
-func (t *tokenCache) get(m map[string][]string, name string) []string {
-	t.mu.RLock()
-	tokens := m[name]
-	t.mu.RUnlock()
-	return tokens
-}
-
-func (t *tokenCache) set(m map[string][]string, name, token string) []string {
-	t.mu.Lock()
-	tokens, ok := m[name]
+	tokens, ok := tc.pods[name]
 	if !ok {
-		tokens = []string{token}
-	} else {
-		tokens = append(tokens, token)
+		tc.pods[name] = []string{token}
+		return
 	}
-	m[name] = tokens
-	t.mu.Unlock()
 
+	for _, t := range tokens {
+		if t == token {
+			return
+		}
+	}
+
+	tc.pods[name] = append(tokens, token)
+}
+
+func (tc *tokenCache) deletePodToken(name string) []string {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+
+	tokens, ok := tc.pods[name]
+	if !ok {
+		return nil
+	}
+
+	delete(tc.pods, name)
 	return tokens
 }
 
-func (t *tokenCache) delete(m map[string][]string, name string) []string {
-	t.mu.Lock()
-	tokens := m[name]
-	delete(m, name)
-	t.mu.Unlock()
+func (tc *tokenCache) getPodTokens(name string) []string {
+	tc.mu.RLock()
+	defer tc.mu.RUnlock()
+
+	tokens, ok := tc.pods[name]
+	if !ok {
+		return nil
+	}
+
+	return append([]string(nil), tokens...)
+}
+
+func (tc *tokenCache) setReplicaSetToken(name, token string) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+
+	tokens, ok := tc.replicaSets[name]
+	if !ok {
+		tc.replicaSets[name] = []string{token}
+		return
+	}
+
+	for _, t := range tokens {
+		if t == token {
+			return
+		}
+	}
+
+	tc.replicaSets[name] = append(tokens, token)
+}
+
+func (tc *tokenCache) deleteReplicaSetToken(name string) []string {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+
+	tokens, ok := tc.replicaSets[name]
+	if !ok {
+		return nil
+	}
+
+	delete(tc.replicaSets, name)
 	return tokens
 }
 
-func (t *tokenCache) isEmpty() bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return len(t.pods)+len(t.replicaSets) == 0
+func (tc *tokenCache) getReplicaSetTokens(name string) []string {
+	tc.mu.RLock()
+	defer tc.mu.RUnlock()
+
+	tokens, ok := tc.replicaSets[name]
+	if !ok {
+		return nil
+	}
+
+	return append([]string(nil), tokens...)
 }
-
-type op int
-
-const (
-	opLog op = iota
-	opDelete
-)
 
 type agentLog struct {
-	op           op
-	resourceName string
-	agentToken   string
-	log          agentsdk.Log
+	name   string
+	token  string
+	log    agentsdk.Log
+	delete bool
 }
 
-// logQueuer is a single-threaded queue for dispatching logs.
 type logQueuer struct {
-	mu     sync.Mutex
-	logger slog.Logger
-	clock  quartz.Clock
-	q      chan agentLog
-
+	logger    slog.Logger
+	clock     quartz.Clock
+	q         <-chan agentLog
 	coderURL  *url.URL
 	loggerTTL time.Duration
-	loggers   map[string]agentLoggerLifecycle
-	logCache  logCache
-}
 
-func (l *logQueuer) work(ctx context.Context) {
-	for ctx.Err() == nil {
-		select {
-		case log := <-l.q:
-			switch log.op {
-			case opLog:
-				l.processLog(ctx, log)
-			case opDelete:
-				l.processDelete(log)
-			}
+	mu      sync.RWMutex
+	loggers map[string]agentLoggerLifecycle
 
-		case <-ctx.Done():
-			return
-		}
-
-	}
-}
-
-func (l *logQueuer) processLog(ctx context.Context, log agentLog) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	queuedLogs := l.logCache.push(log)
-	lgr, ok := l.loggers[log.agentToken]
-	if !ok {
-		client := agentsdk.New(l.coderURL)
-		client.SetSessionToken(log.agentToken)
-		logger := l.logger.With(slog.F("resource_name", log.resourceName))
-		client.SDK.SetLogger(logger)
-
-		_, err := client.PostLogSource(ctx, agentsdk.PostLogSourceRequest{
-			ID:          sourceUUID,
-			Icon:        "/icon/k8s.png",
-			DisplayName: "Kubernetes",
-		})
-		if err != nil {
-			// This shouldn't fail sending the log, as it only affects how they
-			// appear.
-			logger.Error(ctx, "post log source", slog.Error(err))
-		}
-
-		ls := agentsdk.NewLogSender(logger)
-		sl := ls.GetScriptLogger(sourceUUID)
-
-		gracefulCtx, gracefulCancel := context.WithCancel(context.Background())
-
-		// connect to Agent v2.0 API, since we don't need features added later.
-		// This maximizes compatibility.
-		arpc, err := client.ConnectRPC20(gracefulCtx)
-		if err != nil {
-			logger.Error(ctx, "drpc connect", slog.Error(err))
-			gracefulCancel()
-			return
-		}
-		go func() {
-			err := ls.SendLoop(gracefulCtx, arpc)
-			// if the send loop exits on its own without the context
-			// canceling, timeout the logger and force it to recreate.
-			if err != nil && ctx.Err() == nil {
-				l.loggerTimeout(log.agentToken)
-			}
-		}()
-
-		closeTimer := l.clock.AfterFunc(l.loggerTTL, func() {
-			logger.Info(ctx, "logger timeout firing")
-			l.loggerTimeout(log.agentToken)
-		})
-		lifecycle := agentLoggerLifecycle{
-			scriptLogger: sl,
-			close: func() {
-				// We could be stopping for reasons other than the timeout. If
-				// so, stop the timer.
-				closeTimer.Stop()
-				defer gracefulCancel()
-				timeout := l.clock.AfterFunc(5*time.Second, gracefulCancel)
-				defer timeout.Stop()
-				logger.Info(ctx, "logger closing")
-
-				if err := sl.Flush(gracefulCtx); err != nil {
-					// ctx err
-					logger.Warn(gracefulCtx, "timeout reached while flushing")
-					return
-				}
-
-				if err := ls.WaitUntilEmpty(gracefulCtx); err != nil {
-					// ctx err
-					logger.Warn(gracefulCtx, "timeout reached while waiting for log queue to empty")
-				}
-
-				_ = arpc.DRPCConn().Close()
-				client.SDK.HTTPClient.CloseIdleConnections()
-			},
-		}
-		lifecycle.closeTimer = closeTimer
-		l.loggers[log.agentToken] = lifecycle
-		lgr = lifecycle
-	}
-
-	lgr.resetCloseTimer(l.loggerTTL)
-	_ = lgr.scriptLogger.Send(ctx, queuedLogs...)
-	l.logCache.delete(log.agentToken)
-}
-
-func (l *logQueuer) processDelete(log agentLog) {
-	l.mu.Lock()
-	lgr, ok := l.loggers[log.agentToken]
-	if ok {
-		delete(l.loggers, log.agentToken)
-
-	}
-	l.mu.Unlock()
-
-	if ok {
-		// close this async, no one else will have a handle to it since we've
-		// deleted from the map
-		go lgr.close()
-	}
-}
-
-func (l *logQueuer) loggerTimeout(agentToken string) {
-	l.q <- agentLog{
-		op:         opDelete,
-		agentToken: agentToken,
-	}
-}
-
-type agentLoggerLifecycle struct {
-	scriptLogger agentsdk.ScriptLogger
-
-	closeTimer *quartz.Timer
-	close      func()
-}
-
-func (l *agentLoggerLifecycle) resetCloseTimer(ttl time.Duration) {
-	if !l.closeTimer.Reset(ttl) {
-		// If the timer had already fired and we made it active again, stop the
-		// timer. We don't want it to run twice.
-		l.closeTimer.Stop()
-	}
-}
-
-func newColor(value ...color.Attribute) *color.Color {
-	c := color.New(value...)
-	c.EnableColor()
-	return c
+	logCache logCache
 }
 
 type logCache struct {
+	mu   sync.RWMutex
 	logs map[string][]agentsdk.Log
 }
 
-func (l *logCache) push(log agentLog) []agentsdk.Log {
-	logs, ok := l.logs[log.agentToken]
+func (lc *logCache) append(token string, log agentsdk.Log) {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+
+	lc.logs[token] = append(lc.logs[token], log)
+}
+
+func (lc *logCache) flush(token string) []agentsdk.Log {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+
+	logs, ok := lc.logs[token]
 	if !ok {
-		logs = make([]agentsdk.Log, 0, 1)
+		return nil
 	}
-	logs = append(logs, log.log)
-	l.logs[log.agentToken] = logs
+
+	delete(lc.logs, token)
 	return logs
 }
 
-func (l *logCache) delete(token string) {
-	delete(l.logs, token)
+type agentLoggerLifecycle struct {
+	logger agentsdk.AgentLogWriter
+	timer  *quartz.Timer
+}
+
+func (lq *logQueuer) work(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case log := <-lq.q:
+			if log.delete {
+				lq.deleteLogger(log.token)
+				continue
+			}
+
+			lq.logCache.append(log.token, log.log)
+			lq.ensureLogger(ctx, log.token)
+		}
+	}
+}
+
+func (lq *logQueuer) ensureLogger(ctx context.Context, token string) {
+	lq.mu.Lock()
+	defer lq.mu.Unlock()
+
+	lifecycle, ok := lq.loggers[token]
+	if ok {
+		lifecycle.timer.Reset(lq.loggerTTL)
+		return
+	}
+
+	client := codersdk.New(lq.coderURL)
+	client.SetSessionToken(token)
+
+	logger := client.AgentLogWriter(ctx, uuid.New())
+
+	timer := lq.clock.AfterFunc(lq.loggerTTL, func() {
+		lq.deleteLogger(token)
+	})
+
+	lq.loggers[token] = agentLoggerLifecycle{
+		logger: logger,
+		timer:  timer,
+	}
+
+	go func() {
+		defer func() {
+			err := logger.Close()
+			if err != nil {
+				lq.logger.Error(ctx, "close agent logger", slog.Error(err))
+			}
+		}()
+
+		for {
+			logs := lq.logCache.flush(token)
+			if len(logs) == 0 {
+				time.Sleep(time.Second)
+				continue
+			}
+
+			err := logger.Write(ctx, logs...)
+			if err != nil {
+				lq.logger.Error(ctx, "write agent logs", slog.Error(err))
+				return
+			}
+		}
+	}()
+}
+
+func (lq *logQueuer) deleteLogger(token string) {
+	lq.mu.Lock()
+	defer lq.mu.Unlock()
+
+	lifecycle, ok := lq.loggers[token]
+	if !ok {
+		return
+	}
+
+	lifecycle.timer.Stop()
+	delete(lq.loggers, token)
+}
+
+func newColor(attrs ...color.Attribute) *color.Color {
+	c := color.New(attrs...)
+	c.EnableColor()
+	return c
 }

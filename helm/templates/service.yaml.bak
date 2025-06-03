@@ -1,45 +1,3 @@
-{{/*
-Determine if cluster-wide permissions are needed.
-This happens when:
-1. namespaces is explicitly set to empty string (watch all namespaces)
-2. namespaces contains multiple comma-separated values
-3. rbac.clusterWide is explicitly set to true
-*/}}
-{{- $namespaces := .Values.namespaces | default .Release.Namespace -}}
-{{- $namespacesCount := 0 -}}
-{{- if eq $namespaces "" -}}
-  {{- $namespacesCount = 0 -}}
-{{- else -}}
-  {{- $namespacesCount = len (splitList "," $namespaces) -}}
-{{- end -}}
-{{- $useClusterWide := or .Values.rbac.clusterWide (eq $namespaces "") (gt $namespacesCount 1) -}}
-
-{{- if $useClusterWide }}
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: {{ .Release.Name }}-coder-logstream-kube-role
-rules:
-- apiGroups: [""]
-  resources: ["pods", "events"]
-  verbs: ["get", "watch", "list"]
-- apiGroups: ["apps"]
-  resources: ["replicasets", "events"]
-  verbs: ["get", "watch", "list"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: {{ .Release.Name }}-coder-logstream-kube-rolebinding
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: {{ .Release.Name }}-coder-logstream-kube-role
-subjects:
-- kind: ServiceAccount
-  name: {{ .Values.serviceAccount.name | quote }}
-  namespace: {{ .Release.Namespace }}
-{{- else }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -52,6 +10,13 @@ rules:
   resources: ["replicasets", "events"]
   verbs: ["get", "watch", "list"]
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.serviceAccount.name | quote }}
+  annotations: {{ toYaml .Values.serviceAccount.annotations | nindent 4 }}
+  labels: {{ toYaml .Values.serviceAccount.labels | nindent 4 }}
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
@@ -63,14 +28,6 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: {{ .Values.serviceAccount.name | quote }}
-{{- end }}
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: {{ .Values.serviceAccount.name | quote }}
-  annotations: {{ toYaml .Values.serviceAccount.annotations | nindent 4 }}
-  labels: {{ toYaml .Values.serviceAccount.labels | nindent 4 }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -119,7 +76,7 @@ spec:
             - name: CODER_URL
               value: {{ .Values.url }}
             - name: CODER_NAMESPACE
-              value: {{ $namespaces }}
+              value: {{  .Values.namespace | default .Release.Namespace }}
             {{- if .Values.image.sslCertFile }}
             - name: SSL_CERT_FILE
               value: {{ .Values.image.sslCertFile }}
@@ -138,4 +95,3 @@ spec:
       {{- if .Values.volumes }}
       volumes: {{- toYaml .Values.volumes | nindent 8 }}
       {{- end }}
-

@@ -27,7 +27,7 @@ func root() *cobra.Command {
 		coderURL      string
 		fieldSelector string
 		kubeConfig    string
-		namespaces    string
+		namespace     string
 		labelSelector string
 	)
 	cmd := &cobra.Command{
@@ -66,7 +66,7 @@ func root() *cobra.Command {
 			reporter, err := newPodEventLogger(cmd.Context(), podEventLoggerOptions{
 				coderURL:      parsedURL,
 				client:        client,
-				namespaces:    namespaces,
+				namespace:     namespace,
 				fieldSelector: fieldSelector,
 				labelSelector: labelSelector,
 				logger:        slog.Make(sloghuman.Sink(cmd.ErrOrStderr())).Leveled(slog.LevelDebug),
@@ -85,7 +85,7 @@ func root() *cobra.Command {
 	}
 	cmd.Flags().StringVarP(&coderURL, "coder-url", "u", os.Getenv("CODER_URL"), "URL of the Coder instance")
 	cmd.Flags().StringVarP(&kubeConfig, "kubeconfig", "k", "~/.kube/config", "Path to the kubeconfig file")
-	cmd.Flags().StringVarP(&namespaces, "namespaces", "n", os.Getenv("CODER_NAMESPACE"), "Comma-separated list of namespaces to watch for pods. If empty, watches all namespaces.")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", os.Getenv("CODER_NAMESPACE"), "Namespace to use when listing pods")
 	cmd.Flags().StringVarP(&fieldSelector, "field-selector", "f", "", "Field selector to use when listing pods")
 	cmd.Flags().StringVarP(&labelSelector, "label-selector", "l", "", "Label selector to use when listing pods")
 
