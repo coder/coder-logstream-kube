@@ -371,23 +371,24 @@ type tokenCache struct {
 	replicaSets map[string][]string
 }
 
-func (tc *tokenCache) setPodToken(name, token string) {
+func (tc *tokenCache) setPodToken(name, token string) []string {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 
 	tokens, ok := tc.pods[name]
 	if !ok {
 		tc.pods[name] = []string{token}
-		return
+		return []string{token}
 	}
 
 	for _, t := range tokens {
 		if t == token {
-			return
+			return append([]string(nil), tokens...)
 		}
 	}
 
 	tc.pods[name] = append(tokens, token)
+	return append([]string(nil), tc.pods[name]...)
 }
 
 func (tc *tokenCache) deletePodToken(name string) []string {
@@ -415,23 +416,24 @@ func (tc *tokenCache) getPodTokens(name string) []string {
 	return append([]string(nil), tokens...)
 }
 
-func (tc *tokenCache) setReplicaSetToken(name, token string) {
+func (tc *tokenCache) setReplicaSetToken(name, token string) []string {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 
 	tokens, ok := tc.replicaSets[name]
 	if !ok {
 		tc.replicaSets[name] = []string{token}
-		return
+		return []string{token}
 	}
 
 	for _, t := range tokens {
 		if t == token {
-			return
+			return append([]string(nil), tokens...)
 		}
 	}
 
 	tc.replicaSets[name] = append(tokens, token)
+	return append([]string(nil), tc.replicaSets[name]...)
 }
 
 func (tc *tokenCache) deleteReplicaSetToken(name string) []string {
@@ -457,6 +459,13 @@ func (tc *tokenCache) getReplicaSetTokens(name string) []string {
 	}
 
 	return append([]string(nil), tokens...)
+}
+
+func (tc *tokenCache) isEmpty() bool {
+	tc.mu.RLock()
+	defer tc.mu.RUnlock()
+
+	return len(tc.pods) == 0 && len(tc.replicaSets) == 0
 }
 
 type agentLog struct {
@@ -505,7 +514,8 @@ func (lc *logCache) flush(token string) []agentsdk.Log {
 }
 
 type agentLoggerLifecycle struct {
-	logger agentsdk.AgentLogWriter
+	client *agentsdk.Client
+	sourceID uuid.UUID
 	timer  *quartz.Timer
 }
 
@@ -536,28 +546,34 @@ func (lq *logQueuer) ensureLogger(ctx context.Context, token string) {
 		return
 	}
 
-	client := codersdk.New(lq.coderURL)
-	client.SetSessionToken(token)
+	coderClient := codersdk.New(lq.coderURL)
+	coderClient.SetSessionToken(token)
+	agentClient := agentsdk.New(lq.coderURL)
+	agentClient.SetSessionToken(token)
 
-	logger := client.AgentLogWriter(ctx, uuid.New())
+	// Create a log source for this agent
+	sourceID := agentsdk.ExternalLogSourceID
+	_, err := agentClient.PostLogSource(ctx, agentsdk.PostLogSourceRequest{
+		ID:          sourceID,
+		DisplayName: "Kubernetes",
+		Icon:        "/icon/k8s.png",
+	})
+	if err != nil {
+		// Log source might already exist, which is fine
+		lq.logger.Debug(ctx, "failed to create log source", slog.Error(err))
+	}
 
 	timer := lq.clock.AfterFunc(lq.loggerTTL, func() {
 		lq.deleteLogger(token)
 	})
 
 	lq.loggers[token] = agentLoggerLifecycle{
-		logger: logger,
-		timer:  timer,
+		client:   agentClient,
+		sourceID: sourceID,
+		timer:    timer,
 	}
 
 	go func() {
-		defer func() {
-			err := logger.Close()
-			if err != nil {
-				lq.logger.Error(ctx, "close agent logger", slog.Error(err))
-			}
-		}()
-
 		for {
 			logs := lq.logCache.flush(token)
 			if len(logs) == 0 {
@@ -565,9 +581,12 @@ func (lq *logQueuer) ensureLogger(ctx context.Context, token string) {
 				continue
 			}
 
-			err := logger.Write(ctx, logs...)
+			err := agentClient.PatchLogs(ctx, agentsdk.PatchLogs{
+				LogSourceID: sourceID,
+				Logs:        logs,
+			})
 			if err != nil {
-				lq.logger.Error(ctx, "write agent logs", slog.Error(err))
+				lq.logger.Error(ctx, "patch agent logs", slog.Error(err))
 				return
 			}
 		}

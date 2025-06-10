@@ -30,6 +30,7 @@ import (
 	"github.com/coder/coder/v2/codersdk/agentsdk"
 	"github.com/coder/coder/v2/testutil"
 	"github.com/coder/quartz"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func TestReplicaSetEvents(t *testing.T) {
@@ -41,13 +42,14 @@ func TestReplicaSetEvents(t *testing.T) {
 	agentURL, err := url.Parse(api.server.URL)
 	require.NoError(t, err)
 	namespace := "test-namespace"
+	sourceUUID := agentsdk.ExternalLogSourceID
 	client := fake.NewSimpleClientset()
 
 	cMock := quartz.NewMock(t)
 	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
 		client:      client,
 		coderURL:    agentURL,
-		namespace:   namespace,
+		namespaces:  namespace,
 		logger:      slogtest.Make(t, nil).Leveled(slog.LevelDebug),
 		logDebounce: 5 * time.Second,
 		clock:       cMock,
@@ -89,7 +91,7 @@ func TestReplicaSetEvents(t *testing.T) {
 
 	logs := testutil.RequireRecvCtx(ctx, t, api.logs)
 	require.Len(t, logs, 1)
-	require.Contains(t, logs[0].Output, "Queued pod from ReplicaSet")
+	require.Contains(t, logs[0].Output, "Created replicaset")
 
 	event := &corev1.Event{
 		ObjectMeta: v1.ObjectMeta{
@@ -117,7 +119,7 @@ func TestReplicaSetEvents(t *testing.T) {
 
 	logs = testutil.RequireRecvCtx(ctx, t, api.logs)
 	require.Len(t, logs, 1)
-	require.Contains(t, logs[0].Output, "Deleted ReplicaSet")
+	require.Contains(t, logs[0].Output, "Deleted replicaset")
 
 	require.Eventually(t, func() bool {
 		return reporter.tc.isEmpty()
@@ -138,13 +140,14 @@ func TestPodEvents(t *testing.T) {
 	agentURL, err := url.Parse(api.server.URL)
 	require.NoError(t, err)
 	namespace := "test-namespace"
+	sourceUUID := agentsdk.ExternalLogSourceID
 	client := fake.NewSimpleClientset()
 
 	cMock := quartz.NewMock(t)
 	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
 		client:      client,
 		coderURL:    agentURL,
-		namespace:   namespace,
+		namespaces:  namespace,
 		logger:      slogtest.Make(t, nil).Leveled(slog.LevelDebug),
 		logDebounce: 5 * time.Second,
 		clock:       cMock,
@@ -305,9 +308,9 @@ func Test_logQueuer(t *testing.T) {
 		go lq.work(ctx)
 
 		ch <- agentLog{
-			op:           opLog,
-			resourceName: "mypod",
-			agentToken:   "0b42fa72-7f1a-4b59-800d-69d67f56ed8b",
+			name:   "mypod",
+			token:  "0b42fa72-7f1a-4b59-800d-69d67f56ed8b",
+			delete: false,
 			log: agentsdk.Log{
 				CreatedAt: time.Now(),
 				Output:    "This is a log.",
@@ -321,9 +324,9 @@ func Test_logQueuer(t *testing.T) {
 		require.Len(t, logs, 1)
 
 		ch <- agentLog{
-			op:           opLog,
-			resourceName: "mypod",
-			agentToken:   "0b42fa72-7f1a-4b59-800d-69d67f56ed8b",
+			name:   "mypod",
+			token:  "0b42fa72-7f1a-4b59-800d-69d67f56ed8b",
+			delete: false,
 			log: agentsdk.Log{
 				CreatedAt: time.Now(),
 				Output:    "This is a log too.",
@@ -359,6 +362,10 @@ func newFakeAgentAPI(t *testing.T) *fakeAgentAPI {
 
 		rtr.Post("/api/v2/workspaceagents/me/log-source", func(w http.ResponseWriter, r *http.Request) {
 			fakeAPI.PostLogSource(w, r)
+		})
+
+		rtr.Patch("/api/v2/workspaceagents/me/logs", func(w http.ResponseWriter, r *http.Request) {
+			fakeAPI.PatchLogs(w, r)
 		})
 
 		rtr.Get("/api/v2/workspaceagents/me/rpc", func(w http.ResponseWriter, r *http.Request) {
@@ -458,6 +465,29 @@ func (f *fakeAgentAPI) PostLogSource(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fmt.Println("failed to encode:", err.Error())
 	}
+}
+
+func (f *fakeAgentAPI) PatchLogs(w http.ResponseWriter, r *http.Request) {
+	var req agentsdk.PatchLogs
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		fmt.Println("failed to decode patch logs:", err.Error())
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	
+	// Convert agentsdk.Log to proto.Log for the channel
+	protoLogs := make([]*proto.Log, len(req.Logs))
+	for i, log := range req.Logs {
+		protoLogs[i] = &proto.Log{
+			CreatedAt: timestamppb.New(log.CreatedAt),
+			Output:    log.Output,
+			Level:     proto.Log_Level(proto.Log_Level_value[string(log.Level)]),
+		}
+	}
+	
+	f.logs <- protoLogs
+	w.WriteHeader(http.StatusOK)
 }
 
 func TestParseNamespaces(t *testing.T) {
