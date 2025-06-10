@@ -475,14 +475,32 @@ func (f *fakeAgentAPI) PatchLogs(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
+
 	
 	// Convert agentsdk.Log to proto.Log for the channel
 	protoLogs := make([]*proto.Log, len(req.Logs))
 	for i, log := range req.Logs {
+		// Simple log level mapping
+		var level proto.Log_Level
+		switch string(log.Level) {
+		case "trace":
+			level = 1 // Assuming TRACE = 1
+		case "debug":
+			level = 2 // Assuming DEBUG = 2
+		case "info":
+			level = 3 // Assuming INFO = 3
+		case "warn":
+			level = 4 // Assuming WARN = 4
+		case "error":
+			level = 5 // Assuming ERROR = 5
+		default:
+			level = 3 // Default to INFO
+		}
+		
 		protoLogs[i] = &proto.Log{
 			CreatedAt: timestamppb.New(log.CreatedAt),
 			Output:    log.Output,
-			Level:     proto.Log_Level(proto.Log_Level_value[string(log.Level)]),
+			Level:     level,
 		}
 	}
 	

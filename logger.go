@@ -517,6 +517,7 @@ type agentLoggerLifecycle struct {
 	client *agentsdk.Client
 	sourceID uuid.UUID
 	timer  *quartz.Timer
+	cancel context.CancelFunc
 }
 
 func (lq *logQueuer) work(ctx context.Context) {
@@ -563,6 +564,9 @@ func (lq *logQueuer) ensureLogger(ctx context.Context, token string) {
 		lq.logger.Debug(ctx, "failed to create log source", slog.Error(err))
 	}
 
+	// Create a context for this logger that can be cancelled
+	loggerCtx, cancel := context.WithCancel(ctx)
+
 	timer := lq.clock.AfterFunc(lq.loggerTTL, func() {
 		lq.deleteLogger(token)
 	})
@@ -571,23 +575,31 @@ func (lq *logQueuer) ensureLogger(ctx context.Context, token string) {
 		client:   agentClient,
 		sourceID: sourceID,
 		timer:    timer,
+		cancel:   cancel,
 	}
 
 	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		
 		for {
-			logs := lq.logCache.flush(token)
-			if len(logs) == 0 {
-				time.Sleep(time.Second)
-				continue
-			}
-
-			err := agentClient.PatchLogs(ctx, agentsdk.PatchLogs{
-				LogSourceID: sourceID,
-				Logs:        logs,
-			})
-			if err != nil {
-				lq.logger.Error(ctx, "patch agent logs", slog.Error(err))
+			select {
+			case <-loggerCtx.Done():
 				return
+			case <-ticker.C:
+				logs := lq.logCache.flush(token)
+				if len(logs) == 0 {
+					continue
+				}
+
+				err := agentClient.PatchLogs(loggerCtx, agentsdk.PatchLogs{
+					LogSourceID: sourceID,
+					Logs:        logs,
+				})
+				if err != nil {
+					lq.logger.Error(loggerCtx, "patch agent logs", slog.Error(err))
+					// Don't return on error, keep trying
+				}
 			}
 		}
 	}()
@@ -603,6 +615,7 @@ func (lq *logQueuer) deleteLogger(token string) {
 	}
 
 	lifecycle.timer.Stop()
+	lifecycle.cancel() // Cancel the context to stop the goroutine
 	delete(lq.loggers, token)
 }
 
