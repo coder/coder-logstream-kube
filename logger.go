@@ -579,7 +579,7 @@ func (lq *logQueuer) ensureLogger(ctx context.Context, token string) {
 	}
 
 	go func() {
-		ticker := time.NewTicker(time.Second)
+		ticker := lq.clock.NewTicker(time.Second)
 		defer ticker.Stop()
 		
 		for {

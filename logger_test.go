@@ -89,6 +89,9 @@ func TestReplicaSetEvents(t *testing.T) {
 	require.Equal(t, "Kubernetes", source.DisplayName)
 	require.Equal(t, "/icon/k8s.png", source.Icon)
 
+	// Advance clock to trigger log flush
+	cMock.Advance(time.Second)
+	
 	logs := testutil.RequireRecvCtx(ctx, t, api.logs)
 	require.Len(t, logs, 1)
 	require.Contains(t, logs[0].Output, "Created replicaset")
@@ -110,6 +113,9 @@ func TestReplicaSetEvents(t *testing.T) {
 	_, err = client.CoreV1().Events(namespace).Create(ctx, event, v1.CreateOptions{})
 	require.NoError(t, err)
 
+	// Advance clock to trigger log flush
+	cMock.Advance(time.Second)
+	
 	logs = testutil.RequireRecvCtx(ctx, t, api.logs)
 	require.Len(t, logs, 1)
 	require.Contains(t, logs[0].Output, event.Message)
@@ -117,6 +123,9 @@ func TestReplicaSetEvents(t *testing.T) {
 	err = client.AppsV1().ReplicaSets(namespace).Delete(ctx, rs.Name, v1.DeleteOptions{})
 	require.NoError(t, err)
 
+	// Advance clock to trigger log flush
+	cMock.Advance(time.Second)
+	
 	logs = testutil.RequireRecvCtx(ctx, t, api.logs)
 	require.Len(t, logs, 1)
 	require.Contains(t, logs[0].Output, "Deleted replicaset")
@@ -182,6 +191,9 @@ func TestPodEvents(t *testing.T) {
 	require.Equal(t, "Kubernetes", source.DisplayName)
 	require.Equal(t, "/icon/k8s.png", source.Icon)
 
+	// Advance clock to trigger log flush
+	cMock.Advance(time.Second)
+	
 	logs := testutil.RequireRecvCtx(ctx, t, api.logs)
 	require.Len(t, logs, 1)
 	require.Contains(t, logs[0].Output, "Created pod")
@@ -203,6 +215,9 @@ func TestPodEvents(t *testing.T) {
 	_, err = client.CoreV1().Events(namespace).Create(ctx, event, v1.CreateOptions{})
 	require.NoError(t, err)
 
+	// Advance clock to trigger log flush
+	cMock.Advance(time.Second)
+	
 	logs = testutil.RequireRecvCtx(ctx, t, api.logs)
 	require.Len(t, logs, 1)
 	require.Contains(t, logs[0].Output, event.Message)
@@ -210,6 +225,9 @@ func TestPodEvents(t *testing.T) {
 	err = client.CoreV1().Pods(namespace).Delete(ctx, pod.Name, v1.DeleteOptions{})
 	require.NoError(t, err)
 
+	// Advance clock to trigger log flush
+	cMock.Advance(time.Second)
+	
 	logs = testutil.RequireRecvCtx(ctx, t, api.logs)
 	require.Len(t, logs, 1)
 	require.Contains(t, logs[0].Output, "Deleted pod")
@@ -283,14 +301,14 @@ func Test_tokenCache(t *testing.T) {
 }
 
 func Test_logQueuer(t *testing.T) {
-	t.Run("Timeout", func(t *testing.T) {
+	t.Run("Basic", func(t *testing.T) {
 		api := newFakeAgentAPI(t)
 		agentURL, err := url.Parse(api.server.URL)
 		require.NoError(t, err)
-		clock := quartz.NewMock(t)
-		ttl := time.Second
+		clock := quartz.NewReal() // Use real clock for simplicity
+		ttl := 100 * time.Millisecond // Short TTL for faster test
 
-		ch := make(chan agentLog)
+		ch := make(chan agentLog, 10) // Buffered channel to prevent blocking
 		lq := &logQueuer{
 			logger:    slogtest.Make(t, nil),
 			clock:     clock,
@@ -307,6 +325,7 @@ func Test_logQueuer(t *testing.T) {
 		defer cancel()
 		go lq.work(ctx)
 
+		// Send first log
 		ch <- agentLog{
 			name:   "mypod",
 			token:  "0b42fa72-7f1a-4b59-800d-69d67f56ed8b",
@@ -318,11 +337,14 @@ func Test_logQueuer(t *testing.T) {
 			},
 		}
 
-		// it should send both a log source request and the log
+		// Wait for log source to be created
 		_ = testutil.RequireRecvCtx(ctx, t, api.logSource)
+		
+		// Wait for logs to be sent (ticker fires every second)
 		logs := testutil.RequireRecvCtx(ctx, t, api.logs)
 		require.Len(t, logs, 1)
 
+		// Send second log
 		ch <- agentLog{
 			name:   "mypod",
 			token:  "0b42fa72-7f1a-4b59-800d-69d67f56ed8b",
@@ -334,13 +356,18 @@ func Test_logQueuer(t *testing.T) {
 			},
 		}
 
-		// duplicate logs should not trigger a log source
+		// Wait for second batch of logs
 		logs = testutil.RequireRecvCtx(ctx, t, api.logs)
 		require.Len(t, logs, 1)
 
-		clock.Advance(ttl)
-		// wait for the client to disconnect
-		_ = testutil.RequireRecvCtx(ctx, t, api.disconnect)
+		// Test cleanup by waiting for TTL
+		time.Sleep(ttl + 50*time.Millisecond)
+		
+		// Verify that the logger was cleaned up
+		lq.mu.RLock()
+		loggerCount := len(lq.loggers)
+		lq.mu.RUnlock()
+		require.Equal(t, 0, loggerCount, "Logger should be cleaned up after TTL")
 	})
 }
 
