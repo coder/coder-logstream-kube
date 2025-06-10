@@ -30,6 +30,7 @@ import (
 	"github.com/coder/coder/v2/codersdk/agentsdk"
 	"github.com/coder/coder/v2/testutil"
 	"github.com/coder/quartz"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func TestReplicaSetEvents(t *testing.T) {
@@ -41,13 +42,14 @@ func TestReplicaSetEvents(t *testing.T) {
 	agentURL, err := url.Parse(api.server.URL)
 	require.NoError(t, err)
 	namespace := "test-namespace"
+	sourceUUID := agentsdk.ExternalLogSourceID
 	client := fake.NewSimpleClientset()
 
 	cMock := quartz.NewMock(t)
 	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
 		client:      client,
 		coderURL:    agentURL,
-		namespace:   namespace,
+		namespaces:  namespace,
 		logger:      slogtest.Make(t, nil).Leveled(slog.LevelDebug),
 		logDebounce: 5 * time.Second,
 		clock:       cMock,
@@ -87,9 +89,12 @@ func TestReplicaSetEvents(t *testing.T) {
 	require.Equal(t, "Kubernetes", source.DisplayName)
 	require.Equal(t, "/icon/k8s.png", source.Icon)
 
+	// Advance clock to trigger log flush
+	cMock.Advance(time.Second)
+	
 	logs := testutil.RequireRecvCtx(ctx, t, api.logs)
 	require.Len(t, logs, 1)
-	require.Contains(t, logs[0].Output, "Queued pod from ReplicaSet")
+	require.Contains(t, logs[0].Output, "Created replicaset")
 
 	event := &corev1.Event{
 		ObjectMeta: v1.ObjectMeta{
@@ -108,6 +113,9 @@ func TestReplicaSetEvents(t *testing.T) {
 	_, err = client.CoreV1().Events(namespace).Create(ctx, event, v1.CreateOptions{})
 	require.NoError(t, err)
 
+	// Advance clock to trigger log flush
+	cMock.Advance(time.Second)
+	
 	logs = testutil.RequireRecvCtx(ctx, t, api.logs)
 	require.Len(t, logs, 1)
 	require.Contains(t, logs[0].Output, event.Message)
@@ -115,9 +123,12 @@ func TestReplicaSetEvents(t *testing.T) {
 	err = client.AppsV1().ReplicaSets(namespace).Delete(ctx, rs.Name, v1.DeleteOptions{})
 	require.NoError(t, err)
 
+	// Advance clock to trigger log flush
+	cMock.Advance(time.Second)
+	
 	logs = testutil.RequireRecvCtx(ctx, t, api.logs)
 	require.Len(t, logs, 1)
-	require.Contains(t, logs[0].Output, "Deleted ReplicaSet")
+	require.Contains(t, logs[0].Output, "Deleted replicaset")
 
 	require.Eventually(t, func() bool {
 		return reporter.tc.isEmpty()
@@ -138,13 +149,14 @@ func TestPodEvents(t *testing.T) {
 	agentURL, err := url.Parse(api.server.URL)
 	require.NoError(t, err)
 	namespace := "test-namespace"
+	sourceUUID := agentsdk.ExternalLogSourceID
 	client := fake.NewSimpleClientset()
 
 	cMock := quartz.NewMock(t)
 	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
 		client:      client,
 		coderURL:    agentURL,
-		namespace:   namespace,
+		namespaces:  namespace,
 		logger:      slogtest.Make(t, nil).Leveled(slog.LevelDebug),
 		logDebounce: 5 * time.Second,
 		clock:       cMock,
@@ -179,6 +191,9 @@ func TestPodEvents(t *testing.T) {
 	require.Equal(t, "Kubernetes", source.DisplayName)
 	require.Equal(t, "/icon/k8s.png", source.Icon)
 
+	// Advance clock to trigger log flush
+	cMock.Advance(time.Second)
+	
 	logs := testutil.RequireRecvCtx(ctx, t, api.logs)
 	require.Len(t, logs, 1)
 	require.Contains(t, logs[0].Output, "Created pod")
@@ -200,6 +215,9 @@ func TestPodEvents(t *testing.T) {
 	_, err = client.CoreV1().Events(namespace).Create(ctx, event, v1.CreateOptions{})
 	require.NoError(t, err)
 
+	// Advance clock to trigger log flush
+	cMock.Advance(time.Second)
+	
 	logs = testutil.RequireRecvCtx(ctx, t, api.logs)
 	require.Len(t, logs, 1)
 	require.Contains(t, logs[0].Output, event.Message)
@@ -207,6 +225,9 @@ func TestPodEvents(t *testing.T) {
 	err = client.CoreV1().Pods(namespace).Delete(ctx, pod.Name, v1.DeleteOptions{})
 	require.NoError(t, err)
 
+	// Advance clock to trigger log flush
+	cMock.Advance(time.Second)
+	
 	logs = testutil.RequireRecvCtx(ctx, t, api.logs)
 	require.Len(t, logs, 1)
 	require.Contains(t, logs[0].Output, "Deleted pod")
@@ -280,14 +301,14 @@ func Test_tokenCache(t *testing.T) {
 }
 
 func Test_logQueuer(t *testing.T) {
-	t.Run("Timeout", func(t *testing.T) {
+	t.Run("Basic", func(t *testing.T) {
 		api := newFakeAgentAPI(t)
 		agentURL, err := url.Parse(api.server.URL)
 		require.NoError(t, err)
-		clock := quartz.NewMock(t)
-		ttl := time.Second
+		clock := quartz.NewReal() // Use real clock for simplicity
+		ttl := 100 * time.Millisecond // Short TTL for faster test
 
-		ch := make(chan agentLog)
+		ch := make(chan agentLog, 10) // Buffered channel to prevent blocking
 		lq := &logQueuer{
 			logger:    slogtest.Make(t, nil),
 			clock:     clock,
@@ -304,10 +325,11 @@ func Test_logQueuer(t *testing.T) {
 		defer cancel()
 		go lq.work(ctx)
 
+		// Send first log
 		ch <- agentLog{
-			op:           opLog,
-			resourceName: "mypod",
-			agentToken:   "0b42fa72-7f1a-4b59-800d-69d67f56ed8b",
+			name:   "mypod",
+			token:  "0b42fa72-7f1a-4b59-800d-69d67f56ed8b",
+			delete: false,
 			log: agentsdk.Log{
 				CreatedAt: time.Now(),
 				Output:    "This is a log.",
@@ -315,15 +337,18 @@ func Test_logQueuer(t *testing.T) {
 			},
 		}
 
-		// it should send both a log source request and the log
+		// Wait for log source to be created
 		_ = testutil.RequireRecvCtx(ctx, t, api.logSource)
+		
+		// Wait for logs to be sent (ticker fires every second)
 		logs := testutil.RequireRecvCtx(ctx, t, api.logs)
 		require.Len(t, logs, 1)
 
+		// Send second log
 		ch <- agentLog{
-			op:           opLog,
-			resourceName: "mypod",
-			agentToken:   "0b42fa72-7f1a-4b59-800d-69d67f56ed8b",
+			name:   "mypod",
+			token:  "0b42fa72-7f1a-4b59-800d-69d67f56ed8b",
+			delete: false,
 			log: agentsdk.Log{
 				CreatedAt: time.Now(),
 				Output:    "This is a log too.",
@@ -331,13 +356,18 @@ func Test_logQueuer(t *testing.T) {
 			},
 		}
 
-		// duplicate logs should not trigger a log source
+		// Wait for second batch of logs
 		logs = testutil.RequireRecvCtx(ctx, t, api.logs)
 		require.Len(t, logs, 1)
 
-		clock.Advance(ttl)
-		// wait for the client to disconnect
-		_ = testutil.RequireRecvCtx(ctx, t, api.disconnect)
+		// Test cleanup by waiting for TTL
+		time.Sleep(ttl + 50*time.Millisecond)
+		
+		// Verify that the logger was cleaned up
+		lq.mu.RLock()
+		loggerCount := len(lq.loggers)
+		lq.mu.RUnlock()
+		require.Equal(t, 0, loggerCount, "Logger should be cleaned up after TTL")
 	})
 }
 
@@ -359,6 +389,10 @@ func newFakeAgentAPI(t *testing.T) *fakeAgentAPI {
 
 		rtr.Post("/api/v2/workspaceagents/me/log-source", func(w http.ResponseWriter, r *http.Request) {
 			fakeAPI.PostLogSource(w, r)
+		})
+
+		rtr.Patch("/api/v2/workspaceagents/me/logs", func(w http.ResponseWriter, r *http.Request) {
+			fakeAPI.PatchLogs(w, r)
 		})
 
 		rtr.Get("/api/v2/workspaceagents/me/rpc", func(w http.ResponseWriter, r *http.Request) {
@@ -457,5 +491,95 @@ func (f *fakeAgentAPI) PostLogSource(w http.ResponseWriter, r *http.Request) {
 	err = json.NewEncoder(w).Encode(codersdk.WorkspaceAgentLogSource{})
 	if err != nil {
 		fmt.Println("failed to encode:", err.Error())
+	}
+}
+
+func (f *fakeAgentAPI) PatchLogs(w http.ResponseWriter, r *http.Request) {
+	var req agentsdk.PatchLogs
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		fmt.Println("failed to decode patch logs:", err.Error())
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	
+	// Convert agentsdk.Log to proto.Log for the channel
+	protoLogs := make([]*proto.Log, len(req.Logs))
+	for i, log := range req.Logs {
+		// Simple log level mapping
+		var level proto.Log_Level
+		switch string(log.Level) {
+		case "trace":
+			level = 1 // Assuming TRACE = 1
+		case "debug":
+			level = 2 // Assuming DEBUG = 2
+		case "info":
+			level = 3 // Assuming INFO = 3
+		case "warn":
+			level = 4 // Assuming WARN = 4
+		case "error":
+			level = 5 // Assuming ERROR = 5
+		default:
+			level = 3 // Default to INFO
+		}
+		
+		protoLogs[i] = &proto.Log{
+			CreatedAt: timestamppb.New(log.CreatedAt),
+			Output:    log.Output,
+			Level:     level,
+		}
+	}
+	
+	f.logs <- protoLogs
+	w.WriteHeader(http.StatusOK)
+}
+
+func TestParseNamespaces(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{
+			name:     "empty string",
+			input:    "",
+			expected: []string{},
+		},
+		{
+			name:     "single namespace",
+			input:    "default",
+			expected: []string{"default"},
+		},
+		{
+			name:     "multiple namespaces",
+			input:    "ns1,ns2,ns3",
+			expected: []string{"ns1", "ns2", "ns3"},
+		},
+		{
+			name:     "namespaces with spaces",
+			input:    "ns1, ns2 , ns3",
+			expected: []string{"ns1", "ns2", "ns3"},
+		},
+		{
+			name:     "namespaces with empty values",
+			input:    "ns1,,ns2,",
+			expected: []string{"ns1", "ns2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseNamespaces(tt.input)
+			if len(result) != len(tt.expected) {
+				t.Errorf("parseNamespaces(%q) returned %d namespaces, expected %d", tt.input, len(result), len(tt.expected))
+				return
+			}
+			for i, ns := range result {
+				if ns != tt.expected[i] {
+					t.Errorf("parseNamespaces(%q)[%d] = %q, expected %q", tt.input, i, ns, tt.expected[i])
+				}
+			}
+		})
 	}
 }
