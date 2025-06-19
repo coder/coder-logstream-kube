@@ -43,7 +43,7 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: coder-logstream-kube-role
+  name: {{ .Release.Name }}-coder-logstream-kube-role
 rules:
 - apiGroups: [""]
   resources: ["pods", "events"]
@@ -59,7 +59,7 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: coder-logstream-kube-role
+  name: {{ .Release.Name }}-coder-logstream-kube-role
 subjects:
 - kind: ServiceAccount
   name: {{ .Values.serviceAccount.name | quote }}

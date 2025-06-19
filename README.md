@@ -1,6 +1,8 @@
 # coder-logstream-kube
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/coder/coder-logstream-kube.svg)](https://pkg.go.dev/github.com/coder/coder-logstream-kube)
+[![discord](https://img.shields.io/discord/747933592273027093?label=discord)](https://discord.gg/coder)
+[![release](https://img.shields.io/github/v/tag/coder/coder-logstream-kube)](https://github.com/coder/coder-logstream-kube/releases)
+[![godoc](https://pkg.go.dev/badge/github.com/coder/coder-logstream-kube.svg)](https://pkg.go.dev/github.com/coder/coder-logstream-kube)
 [![license](https://img.shields.io/github/license/coder/coder-logstream-kube)](./LICENSE)
 
 Stream Kubernetes Pod events to the Coder startup logs.

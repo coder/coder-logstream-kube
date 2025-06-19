@@ -99,8 +99,3 @@ labels: {}
 # securityContext -- Container-level security context
 # See: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
 securityContext: {}
-  # allowPrivilegeEscalation: false
-  # capabilities:
-  #   drop:
-  #   - ALL
-  # readOnlyRootFilesystem: true
