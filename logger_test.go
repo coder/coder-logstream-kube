@@ -45,14 +45,14 @@ func TestReplicaSetEvents(t *testing.T) {
 	sourceUUID := agentsdk.ExternalLogSourceID
 	client := fake.NewSimpleClientset()
 
-	cMock := quartz.NewMock(t)
 	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
-		client:      client,
-		coderURL:    agentURL,
-		namespaces:  namespace,
-		logger:      slogtest.Make(t, nil).Leveled(slog.LevelDebug),
-		logDebounce: 5 * time.Second,
-		clock:       cMock,
+		client:       client,
+		coderURL:     agentURL,
+		namespaces:   namespace,
+		logger:       slogtest.Make(t, nil).Leveled(slog.LevelDebug),
+		logDebounce:  5 * time.Second,
+		clock:        quartz.NewReal(),
+		tickInterval: 10 * time.Millisecond,
 	})
 	require.NoError(t, err)
 
@@ -89,8 +89,8 @@ func TestReplicaSetEvents(t *testing.T) {
 	require.Equal(t, "Kubernetes", source.DisplayName)
 	require.Equal(t, "/icon/k8s.png", source.Icon)
 
-	// Advance clock to trigger log flush
-	cMock.Advance(time.Second)
+	// Wait for ticker to fire (ticker fires every 10ms)
+	time.Sleep(50 * time.Millisecond)
 	
 	logs := testutil.RequireRecvCtx(ctx, t, api.logs)
 	require.Len(t, logs, 1)
@@ -113,8 +113,8 @@ func TestReplicaSetEvents(t *testing.T) {
 	_, err = client.CoreV1().Events(namespace).Create(ctx, event, v1.CreateOptions{})
 	require.NoError(t, err)
 
-	// Advance clock to trigger log flush
-	cMock.Advance(time.Second)
+	// Wait for ticker to fire (ticker fires every 10ms)
+	time.Sleep(50 * time.Millisecond)
 	
 	logs = testutil.RequireRecvCtx(ctx, t, api.logs)
 	require.Len(t, logs, 1)
@@ -123,8 +123,8 @@ func TestReplicaSetEvents(t *testing.T) {
 	err = client.AppsV1().ReplicaSets(namespace).Delete(ctx, rs.Name, v1.DeleteOptions{})
 	require.NoError(t, err)
 
-	// Advance clock to trigger log flush
-	cMock.Advance(time.Second)
+	// Wait for ticker to fire (ticker fires every 10ms)
+	time.Sleep(50 * time.Millisecond)
 	
 	logs = testutil.RequireRecvCtx(ctx, t, api.logs)
 	require.Len(t, logs, 1)
@@ -152,14 +152,14 @@ func TestPodEvents(t *testing.T) {
 	sourceUUID := agentsdk.ExternalLogSourceID
 	client := fake.NewSimpleClientset()
 
-	cMock := quartz.NewMock(t)
 	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
-		client:      client,
-		coderURL:    agentURL,
-		namespaces:  namespace,
-		logger:      slogtest.Make(t, nil).Leveled(slog.LevelDebug),
-		logDebounce: 5 * time.Second,
-		clock:       cMock,
+		client:       client,
+		coderURL:     agentURL,
+		namespaces:   namespace,
+		logger:       slogtest.Make(t, nil).Leveled(slog.LevelDebug),
+		logDebounce:  5 * time.Second,
+		clock:        quartz.NewReal(),
+		tickInterval: 10 * time.Millisecond,
 	})
 	require.NoError(t, err)
 
@@ -191,8 +191,8 @@ func TestPodEvents(t *testing.T) {
 	require.Equal(t, "Kubernetes", source.DisplayName)
 	require.Equal(t, "/icon/k8s.png", source.Icon)
 
-	// Advance clock to trigger log flush
-	cMock.Advance(time.Second)
+	// Wait for ticker to fire (ticker fires every 10ms)
+	time.Sleep(50 * time.Millisecond)
 	
 	logs := testutil.RequireRecvCtx(ctx, t, api.logs)
 	require.Len(t, logs, 1)
@@ -215,8 +215,8 @@ func TestPodEvents(t *testing.T) {
 	_, err = client.CoreV1().Events(namespace).Create(ctx, event, v1.CreateOptions{})
 	require.NoError(t, err)
 
-	// Advance clock to trigger log flush
-	cMock.Advance(time.Second)
+	// Wait for ticker to fire (ticker fires every 10ms)
+	time.Sleep(50 * time.Millisecond)
 	
 	logs = testutil.RequireRecvCtx(ctx, t, api.logs)
 	require.Len(t, logs, 1)
@@ -225,8 +225,8 @@ func TestPodEvents(t *testing.T) {
 	err = client.CoreV1().Pods(namespace).Delete(ctx, pod.Name, v1.DeleteOptions{})
 	require.NoError(t, err)
 
-	// Advance clock to trigger log flush
-	cMock.Advance(time.Second)
+	// Wait for ticker to fire (ticker fires every 10ms)
+	time.Sleep(50 * time.Millisecond)
 	
 	logs = testutil.RequireRecvCtx(ctx, t, api.logs)
 	require.Len(t, logs, 1)
@@ -305,17 +305,18 @@ func Test_logQueuer(t *testing.T) {
 		api := newFakeAgentAPI(t)
 		agentURL, err := url.Parse(api.server.URL)
 		require.NoError(t, err)
-		clock := quartz.NewReal() // Use real clock for simplicity
-		ttl := 100 * time.Millisecond // Short TTL for faster test
+		clock := quartz.NewReal() // Use real clock with fast intervals
+		ttl := 5 * time.Second // TTL longer than ticker interval
 
 		ch := make(chan agentLog, 10) // Buffered channel to prevent blocking
 		lq := &logQueuer{
-			logger:    slogtest.Make(t, nil),
-			clock:     clock,
-			q:         ch,
-			coderURL:  agentURL,
-			loggerTTL: ttl,
-			loggers:   map[string]agentLoggerLifecycle{},
+			logger:       slogtest.Make(t, nil),
+			clock:        clock,
+			q:            ch,
+			coderURL:     agentURL,
+			loggerTTL:    ttl,
+			tickInterval: 10 * time.Millisecond, // Fast ticking for tests
+			loggers:      map[string]agentLoggerLifecycle{},
 			logCache: logCache{
 				logs: map[string][]agentsdk.Log{},
 			},
@@ -340,7 +341,10 @@ func Test_logQueuer(t *testing.T) {
 		// Wait for log source to be created
 		_ = testutil.RequireRecvCtx(ctx, t, api.logSource)
 		
-		// Wait for logs to be sent (ticker fires every second)
+		// Wait for ticker to fire (ticker fires every 10ms)
+		time.Sleep(20 * time.Millisecond)
+		
+		// Wait for logs to be sent
 		logs := testutil.RequireRecvCtx(ctx, t, api.logs)
 		require.Len(t, logs, 1)
 
@@ -356,6 +360,9 @@ func Test_logQueuer(t *testing.T) {
 			},
 		}
 
+		// Wait for ticker to fire for second batch
+		time.Sleep(20 * time.Millisecond)
+		
 		// Wait for second batch of logs
 		logs = testutil.RequireRecvCtx(ctx, t, api.logs)
 		require.Len(t, logs, 1)

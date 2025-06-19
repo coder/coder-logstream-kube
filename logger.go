@@ -40,6 +40,7 @@ type podEventLoggerOptions struct {
 	namespaces    string
 	fieldSelector string
 	labelSelector string
+	tickInterval  time.Duration
 }
 
 // newPodEventLogger creates a set of Kubernetes informers that listen for
@@ -51,6 +52,9 @@ func newPodEventLogger(ctx context.Context, opts podEventLoggerOptions) (*podEve
 	}
 	if opts.clock == nil {
 		opts.clock = quartz.NewReal()
+	}
+	if opts.tickInterval == 0 {
+		opts.tickInterval = time.Second
 	}
 
 	logCh := make(chan agentLog, 512)
@@ -67,12 +71,13 @@ func newPodEventLogger(ctx context.Context, opts podEventLoggerOptions) (*podEve
 			replicaSets: map[string][]string{},
 		},
 		lq: &logQueuer{
-			logger:    opts.logger,
-			clock:     opts.clock,
-			q:         logCh,
-			coderURL:  opts.coderURL,
-			loggerTTL: opts.logDebounce,
-			loggers:   map[string]agentLoggerLifecycle{},
+			logger:       opts.logger,
+			clock:        opts.clock,
+			q:            logCh,
+			coderURL:     opts.coderURL,
+			loggerTTL:    opts.logDebounce,
+			tickInterval: opts.tickInterval,
+			loggers:      map[string]agentLoggerLifecycle{},
 			logCache: logCache{
 				logs: map[string][]agentsdk.Log{},
 			},
@@ -476,11 +481,12 @@ type agentLog struct {
 }
 
 type logQueuer struct {
-	logger    slog.Logger
-	clock     quartz.Clock
-	q         <-chan agentLog
-	coderURL  *url.URL
-	loggerTTL time.Duration
+	logger       slog.Logger
+	clock        quartz.Clock
+	q            <-chan agentLog
+	coderURL     *url.URL
+	loggerTTL    time.Duration
+	tickInterval time.Duration
 
 	mu      sync.RWMutex
 	loggers map[string]agentLoggerLifecycle
@@ -579,7 +585,7 @@ func (lq *logQueuer) ensureLogger(ctx context.Context, token string) {
 	}
 
 	go func() {
-		ticker := lq.clock.NewTicker(time.Second)
+		ticker := lq.clock.NewTicker(lq.tickInterval)
 		defer ticker.Stop()
 		
 		for {
