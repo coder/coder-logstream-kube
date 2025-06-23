@@ -11,7 +11,7 @@ require (
 	github.com/coder/coder/v2 v2.10.1-0.20240703121105-f6639b788f7b
 	github.com/coder/quartz v0.2.1
 	github.com/fatih/color v1.18.0
-	github.com/go-chi/chi/v5 v5.2.1
+	github.com/go-chi/chi/v5 v5.2.2
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/yamux v0.1.2
 	github.com/spf13/cobra v1.7.0
