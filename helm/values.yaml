@@ -5,6 +5,11 @@ url: ""
 # If unspecified, this defaults to the Helm namespace.
 namespace: ""
 
+# rbac -- Specifies whether the RBAC components are installed.
+# If enabled is set to false, the RBAC components must be installed outside of the Helm Chart
+rbac:
+  enabled: true
+
 # volumes -- A list of extra volumes to add to the coder-logstream pod.
 volumes:
   #   emptyDir: {}
