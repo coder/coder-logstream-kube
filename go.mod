@@ -17,7 +17,7 @@ require (
 	github.com/spf13/cobra v1.7.0
 	github.com/stretchr/testify v1.10.0
 	k8s.io/api v0.33.2
-	k8s.io/apimachinery v0.33.2
+	k8s.io/apimachinery v0.33.4
 	k8s.io/client-go v0.33.2
 	nhooyr.io/websocket v1.8.11
 	storj.io/drpc v0.0.34
