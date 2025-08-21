@@ -36,7 +36,7 @@ type podEventLoggerOptions struct {
 	logDebounce time.Duration
 
 	// The following fields are optional!
-	namespace     string
+	namespaces    []string
 	fieldSelector string
 	labelSelector string
 }
@@ -78,7 +78,18 @@ func newPodEventLogger(ctx context.Context, opts podEventLoggerOptions) (*podEve
 		},
 	}
 
-	return reporter, reporter.init()
+	// If no namespaces are provided, we listen for events in all namespaces.
+	if len(opts.namespaces) == 0 {
+		reporter.initNamespace("")
+	} else {
+		for _, namespace := range opts.namespaces {
+			if err := reporter.initNamespace(namespace); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return reporter, nil
 }
 
 type podEventLogger struct {
@@ -96,21 +107,21 @@ type podEventLogger struct {
 }
 
 // init starts the informer factory and registers event handlers.
-func (p *podEventLogger) init() error {
+func (p *podEventLogger) initNamespace(namespace string) error {
 	// We only track events that happen after the reporter starts.
 	// This is to prevent us from sending duplicate events.
 	startTime := time.Now()
 
 	go p.lq.work(p.ctx)
 
-	podFactory := informers.NewSharedInformerFactoryWithOptions(p.client, 0, informers.WithNamespace(p.namespace), informers.WithTweakListOptions(func(lo *v1.ListOptions) {
+	podFactory := informers.NewSharedInformerFactoryWithOptions(p.client, 0, informers.WithNamespace(namespace), informers.WithTweakListOptions(func(lo *v1.ListOptions) {
 		lo.FieldSelector = p.fieldSelector
 		lo.LabelSelector = p.labelSelector
 	}))
 	eventFactory := podFactory
 	if p.fieldSelector != "" || p.labelSelector != "" {
 		// Events cannot filter on labels and fields!
-		eventFactory = informers.NewSharedInformerFactoryWithOptions(p.client, 0, informers.WithNamespace(p.namespace))
+		eventFactory = informers.NewSharedInformerFactoryWithOptions(p.client, 0, informers.WithNamespace(namespace))
 	}
 
 	// We listen for Pods and Events in the informer factory.
@@ -277,7 +288,7 @@ func (p *podEventLogger) init() error {
 
 	p.logger.Info(p.ctx, "listening for pod events",
 		slog.F("coder_url", p.coderURL.String()),
-		slog.F("namespace", p.namespace),
+		slog.F("namespace", namespace),
 		slog.F("field_selector", p.fieldSelector),
 		slog.F("label_selector", p.labelSelector),
 	)

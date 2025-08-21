@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 
 	"cdr.dev/slog"
 	"cdr.dev/slog/sloggers/sloghuman"
@@ -27,7 +28,7 @@ func root() *cobra.Command {
 		coderURL      string
 		fieldSelector string
 		kubeConfig    string
-		namespace     string
+		namespacesStr string
 		labelSelector string
 	)
 	cmd := &cobra.Command{
@@ -63,10 +64,18 @@ func root() *cobra.Command {
 				return fmt.Errorf("create kubernetes client: %w", err)
 			}
 
+			var namespaces []string
+			if namespacesStr != "" {
+				namespaces = strings.Split(namespacesStr, ",")
+				for i, namespace := range namespaces {
+					namespaces[i] = strings.TrimSpace(namespace)
+				}
+			}
+
 			reporter, err := newPodEventLogger(cmd.Context(), podEventLoggerOptions{
 				coderURL:      parsedURL,
 				client:        client,
-				namespace:     namespace,
+				namespaces:    namespaces,
 				fieldSelector: fieldSelector,
 				labelSelector: labelSelector,
 				logger:        slog.Make(sloghuman.Sink(cmd.ErrOrStderr())).Leveled(slog.LevelDebug),
@@ -85,7 +94,7 @@ func root() *cobra.Command {
 	}
 	cmd.Flags().StringVarP(&coderURL, "coder-url", "u", os.Getenv("CODER_URL"), "URL of the Coder instance")
 	cmd.Flags().StringVarP(&kubeConfig, "kubeconfig", "k", "~/.kube/config", "Path to the kubeconfig file")
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", os.Getenv("CODER_NAMESPACE"), "Namespace to use when listing pods")
+	cmd.Flags().StringVarP(&namespacesStr, "namespaces", "n", os.Getenv("CODER_NAMESPACES"), "List of namespaces to use when listing pods")
 	cmd.Flags().StringVarP(&fieldSelector, "field-selector", "f", "", "Field selector to use when listing pods")
 	cmd.Flags().StringVarP(&labelSelector, "label-selector", "l", "", "Label selector to use when listing pods")
 

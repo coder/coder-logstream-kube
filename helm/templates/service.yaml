@@ -1,5 +1,5 @@
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
   name: coder-logstream-kube-role
 rules:
@@ -18,16 +18,17 @@ metadata:
   labels: {{ toYaml .Values.serviceAccount.labels | nindent 4 }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
   name: coder-logstream-kube-rolebinding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: Role
+  kind: ClusterRole
   name: coder-logstream-kube-role
 subjects:
 - kind: ServiceAccount
   name: {{ .Values.serviceAccount.name | quote }}
+  namespace: {{ .Release.Namespace }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -75,8 +76,8 @@ spec:
           env:
             - name: CODER_URL
               value: {{ .Values.url }}
-            - name: CODER_NAMESPACE
-              value: {{  .Values.namespace | default .Release.Namespace }}
+            - name: CODER_NAMESPACES
+              value: {{ if .Values.namespaces }}{{ join "," .Values.namespaces }}{{ else }}{{ end }}
             {{- if .Values.image.sslCertFile }}
             - name: SSL_CERT_FILE
               value: {{ .Values.image.sslCertFile }}
