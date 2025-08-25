@@ -106,7 +106,8 @@ type podEventLogger struct {
 	lq    *logQueuer
 }
 
-// init starts the informer factory and registers event handlers.
+// initNamespace starts the informer factory and registers event handlers for a given namespace.
+// If provided namespace is empty, it will start the informer factory and register event handlers for all namespaces.
 func (p *podEventLogger) initNamespace(namespace string) error {
 	// We only track events that happen after the reporter starts.
 	// This is to prevent us from sending duplicate events.

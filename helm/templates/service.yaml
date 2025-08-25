@@ -1,21 +1,45 @@
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: coder-logstream-kube-role
-rules:
+{{- define "coder-logstream-kube.rules" -}}
 - apiGroups: [""]
   resources: ["pods", "events"]
   verbs: ["get", "watch", "list"]
 - apiGroups: ["apps"]
   resources: ["replicasets", "events"]
   verbs: ["get", "watch", "list"]
+{{- end -}}
+
+{{- if .Values.namespaces }}
+{{- range .Values.namespaces }}
 ---
-apiVersion: v1
-kind: ServiceAccount
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
 metadata:
-  name: {{ .Values.serviceAccount.name | quote }}
-  annotations: {{ toYaml .Values.serviceAccount.annotations | nindent 4 }}
-  labels: {{ toYaml .Values.serviceAccount.labels | nindent 4 }}
+  name: coder-logstream-kube-role
+  namespace: {{ . }}
+rules:
+{{ include "coder-logstream-kube.rules" . | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: coder-logstream-kube-rolebinding
+  namespace: {{ . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: coder-logstream-kube-role
+subjects:
+- kind: ServiceAccount
+  name: {{ $.Values.serviceAccount.name | quote }}
+  namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- else }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: coder-logstream-kube-role
+rules:
+{{ include "coder-logstream-kube.rules" . | nindent 2 }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -29,6 +53,14 @@ subjects:
 - kind: ServiceAccount
   name: {{ .Values.serviceAccount.name | quote }}
   namespace: {{ .Release.Namespace }}
+{{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.serviceAccount.name | quote }}
+  annotations: {{ toYaml .Values.serviceAccount.annotations | nindent 4 }}
+  labels: {{ toYaml .Values.serviceAccount.labels | nindent 4 }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -76,8 +108,10 @@ spec:
           env:
             - name: CODER_URL
               value: {{ .Values.url }}
+            {{- if .Values.namespaces }}
             - name: CODER_NAMESPACES
-              value: {{ if .Values.namespaces }}{{ join "," .Values.namespaces }}{{ else }}{{ end }}
+              value: {{ join "," .Values.namespaces }}
+            {{- end }}
             {{- if .Values.image.sslCertFile }}
             - name: SSL_CERT_FILE
               value: {{ .Values.image.sslCertFile }}
