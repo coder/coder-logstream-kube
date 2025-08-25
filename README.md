@@ -24,6 +24,20 @@ helm install coder-logstream-kube coder-logstream-kube/coder-logstream-kube \
     --set url=<your-coder-url-including-http-or-https>
 ```
 
+> **Multi-Namespace support**
+>
+> By default, coder-logstream-kube will watch all namespaces in the cluster. To limit which namespaces are monitored, you can specify them in the [values.yaml](helm/values.yaml) file:
+>
+> ```yaml
+> # Watch specific namespaces only
+> namespaces: ["default", "kube-system"]
+> 
+> # Watch all namespaces (default)
+> namespaces: []
+> ```
+>
+> When `namespaces` is empty or not specified, the service will monitor all namespaces in the cluster.
+
 > **Note**
 > For additional customization (such as customizing the image, pull secrets, annotations, etc.), you can use the
 > [values.yaml](helm/values.yaml) file directly.
