@@ -47,7 +47,7 @@ func TestReplicaSetEvents(t *testing.T) {
 	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
 		client:      client,
 		coderURL:    agentURL,
-		namespace:   namespace,
+		namespaces:  []string{namespace},
 		logger:      slogtest.Make(t, nil).Leveled(slog.LevelDebug),
 		logDebounce: 5 * time.Second,
 		clock:       cMock,
@@ -144,7 +144,7 @@ func TestPodEvents(t *testing.T) {
 	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
 		client:      client,
 		coderURL:    agentURL,
-		namespace:   namespace,
+		namespaces:  []string{namespace},
 		logger:      slogtest.Make(t, nil).Leveled(slog.LevelDebug),
 		logDebounce: 5 * time.Second,
 		clock:       cMock,
@@ -217,6 +217,153 @@ func TestPodEvents(t *testing.T) {
 
 	_ = testutil.RequireRecvCtx(ctx, t, api.disconnect)
 
+	err = reporter.Close()
+	require.NoError(t, err)
+}
+
+func Test_newPodEventLogger_multipleNamespaces(t *testing.T) {
+	t.Parallel()
+
+	api := newFakeAgentAPI(t)
+
+	ctx := testutil.Context(t, testutil.WaitShort)
+	agentURL, err := url.Parse(api.server.URL)
+	require.NoError(t, err)
+	namespaces := []string{"test-namespace1", "test-namespace2"}
+	client := fake.NewSimpleClientset()
+
+	cMock := quartz.NewMock(t)
+	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
+		client:      client,
+		coderURL:    agentURL,
+		namespaces:  namespaces,
+		logger:      slogtest.Make(t, nil).Leveled(slog.LevelDebug),
+		logDebounce: 5 * time.Second,
+		clock:       cMock,
+	})
+	require.NoError(t, err)
+
+	// Create a pod in the test-namespace1 namespace
+	pod1 := &corev1.Pod{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test-pod-1",
+			Namespace: "test-namespace1",
+			CreationTimestamp: v1.Time{
+				Time: time.Now().Add(time.Hour),
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Env: []corev1.EnvVar{
+						{
+							Name:  "CODER_AGENT_TOKEN",
+							Value: "test-token-1",
+						},
+					},
+				},
+			},
+		},
+	}
+	_, err = client.CoreV1().Pods("test-namespace1").Create(ctx, pod1, v1.CreateOptions{})
+	require.NoError(t, err)
+
+	// Create a pod in the test-namespace2 namespace
+	pod2 := &corev1.Pod{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test-pod-2",
+			Namespace: "test-namespace2",
+			CreationTimestamp: v1.Time{
+				Time: time.Now().Add(time.Hour),
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Env: []corev1.EnvVar{
+						{
+							Name:  "CODER_AGENT_TOKEN",
+							Value: "test-token-2",
+						},
+					},
+				},
+			},
+		},
+	}
+	_, err = client.CoreV1().Pods("test-namespace2").Create(ctx, pod2, v1.CreateOptions{})
+	require.NoError(t, err)
+
+	// Wait for both pods to be registered
+	source1 := testutil.RequireRecvCtx(ctx, t, api.logSource)
+	require.Equal(t, sourceUUID, source1.ID)
+	require.Equal(t, "Kubernetes", source1.DisplayName)
+	require.Equal(t, "/icon/k8s.png", source1.Icon)
+
+	source2 := testutil.RequireRecvCtx(ctx, t, api.logSource)
+	require.Equal(t, sourceUUID, source2.ID)
+	require.Equal(t, "Kubernetes", source2.DisplayName)
+	require.Equal(t, "/icon/k8s.png", source2.Icon)
+
+	// Wait for both creation logs
+	logs1 := testutil.RequireRecvCtx(ctx, t, api.logs)
+	require.Len(t, logs1, 1)
+	require.Contains(t, logs1[0].Output, "Created pod")
+
+	logs2 := testutil.RequireRecvCtx(ctx, t, api.logs)
+	require.Len(t, logs2, 1)
+	require.Contains(t, logs2[0].Output, "Created pod")
+
+	// Create an event in the first namespace
+	event1 := &corev1.Event{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test-event-1",
+			Namespace: "test-namespace1",
+			CreationTimestamp: v1.Time{
+				Time: time.Now().Add(time.Hour),
+			},
+		},
+		InvolvedObject: corev1.ObjectReference{
+			Kind:      "Pod",
+			Name:      "test-pod-1",
+			Namespace: "test-namespace1",
+		},
+		Reason:  "Test",
+		Message: "Test event for namespace1",
+	}
+	_, err = client.CoreV1().Events("test-namespace1").Create(ctx, event1, v1.CreateOptions{})
+	require.NoError(t, err)
+
+	// Wait for the event log
+	eventLogs := testutil.RequireRecvCtx(ctx, t, api.logs)
+	require.Len(t, eventLogs, 1)
+	require.Contains(t, eventLogs[0].Output, "Test event for namespace1")
+
+	// Create an event in the first namespace
+	event2 := &corev1.Event{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test-event-2",
+			Namespace: "test-namespace2",
+			CreationTimestamp: v1.Time{
+				Time: time.Now().Add(time.Hour),
+			},
+		},
+		InvolvedObject: corev1.ObjectReference{
+			Kind:      "Pod",
+			Name:      "test-pod-2",
+			Namespace: "test-namespace2",
+		},
+		Reason:  "Test",
+		Message: "Test event for namespace2",
+	}
+	_, err = client.CoreV1().Events("test-namespace2").Create(ctx, event2, v1.CreateOptions{})
+	require.NoError(t, err)
+
+	// Wait for the event log
+	eventLogs2 := testutil.RequireRecvCtx(ctx, t, api.logs)
+	require.Len(t, eventLogs2, 1)
+	require.Contains(t, eventLogs2[0].Output, "Test event for namespace2")
+
+	// Clean up
 	err = reporter.Close()
 	require.NoError(t, err)
 }

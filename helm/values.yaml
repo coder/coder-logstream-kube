@@ -1,9 +1,9 @@
 # url -- The URL of your Coder deployment. Must prefix with http or https
 url: ""
 
-# namespace -- The namespace to searching for Pods within.
-# If unspecified, this defaults to the Helm namespace.
-namespace: ""
+# namespace -- List of namespaces to search for Pods within.
+# If unspecified or empty it will watch all namespaces.
+namespaces: []
 
 # volumes -- A list of extra volumes to add to the coder-logstream pod.
 volumes:
