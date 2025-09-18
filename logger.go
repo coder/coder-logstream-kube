@@ -407,6 +407,8 @@ type logQueuer struct {
 	loggerTTL time.Duration
 	loggers   map[string]agentLoggerLifecycle
 	logCache  logCache
+
+	retries map[string]*retryState
 }
 
 func (l *logQueuer) work(ctx context.Context) {
@@ -427,87 +429,120 @@ func (l *logQueuer) work(ctx context.Context) {
 	}
 }
 
+func (l *logQueuer) newLogger(ctx context.Context, log agentLog, queuedLogs []agentsdk.Log) (agentLoggerLifecycle, error) {
+	client := agentsdk.New(l.coderURL)
+	client.SetSessionToken(log.agentToken)
+	logger := l.logger.With(slog.F("resource_name", log.resourceName))
+	client.SDK.SetLogger(logger)
+
+	_, err := client.PostLogSource(ctx, agentsdk.PostLogSourceRequest{
+		ID:          sourceUUID,
+		Icon:        "/icon/k8s.png",
+		DisplayName: "Kubernetes",
+	})
+	if err != nil {
+		// This shouldn't fail sending the log, as it only affects how they
+		// appear.
+		logger.Error(ctx, "post log source", slog.Error(err))
+		l.scheduleRetry(ctx, log.agentToken)
+		return agentLoggerLifecycle{}, err
+	}
+
+	ls := agentsdk.NewLogSender(logger)
+	sl := ls.GetScriptLogger(sourceUUID)
+
+	gracefulCtx, gracefulCancel := context.WithCancel(context.Background())
+
+	// connect to Agent v2.0 API, since we don't need features added later.
+	// This maximizes compatibility.
+	arpc, err := client.ConnectRPC20(gracefulCtx)
+	if err != nil {
+		logger.Error(ctx, "drpc connect", slog.Error(err))
+		gracefulCancel()
+		l.scheduleRetry(ctx, log.agentToken)
+		return agentLoggerLifecycle{}, err
+	}
+	go func() {
+		err := ls.SendLoop(gracefulCtx, arpc)
+		// if the send loop exits on its own without the context
+		// canceling, timeout the logger and force it to recreate.
+		if err != nil && ctx.Err() == nil {
+			l.loggerTimeout(log.agentToken)
+		}
+	}()
+
+	closeTimer := l.clock.AfterFunc(l.loggerTTL, func() {
+		logger.Info(ctx, "logger timeout firing")
+		l.loggerTimeout(log.agentToken)
+	})
+	lifecycle := agentLoggerLifecycle{
+		scriptLogger: sl,
+		close: func() {
+			// We could be stopping for reasons other than the timeout. If
+			// so, stop the timer.
+			closeTimer.Stop()
+			defer gracefulCancel()
+			timeout := l.clock.AfterFunc(5*time.Second, gracefulCancel)
+			defer timeout.Stop()
+			logger.Info(ctx, "logger closing")
+
+			if err := sl.Flush(gracefulCtx); err != nil {
+				// ctx err
+				logger.Warn(gracefulCtx, "timeout reached while flushing")
+				return
+			}
+
+			if err := ls.WaitUntilEmpty(gracefulCtx); err != nil {
+				// ctx err
+				logger.Warn(gracefulCtx, "timeout reached while waiting for log queue to empty")
+			}
+
+			_ = arpc.DRPCConn().Close()
+			client.SDK.HTTPClient.CloseIdleConnections()
+		},
+	}
+	lifecycle.closeTimer = closeTimer
+	return lifecycle, nil
+}
+
 func (l *logQueuer) processLog(ctx context.Context, log agentLog) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	queuedLogs := l.logCache.push(log)
-	lgr, ok := l.loggers[log.agentToken]
-	if !ok {
-		client := agentsdk.New(l.coderURL)
-		client.SetSessionToken(log.agentToken)
-		logger := l.logger.With(slog.F("resource_name", log.resourceName))
-		client.SDK.SetLogger(logger)
 
-		_, err := client.PostLogSource(ctx, agentsdk.PostLogSourceRequest{
-			ID:          sourceUUID,
-			Icon:        "/icon/k8s.png",
-			DisplayName: "Kubernetes",
-		})
-		if err != nil {
-			// This shouldn't fail sending the log, as it only affects how they
-			// appear.
-			logger.Error(ctx, "post log source", slog.Error(err))
-		}
-
-		ls := agentsdk.NewLogSender(logger)
-		sl := ls.GetScriptLogger(sourceUUID)
-
-		gracefulCtx, gracefulCancel := context.WithCancel(context.Background())
-
-		// connect to Agent v2.0 API, since we don't need features added later.
-		// This maximizes compatibility.
-		arpc, err := client.ConnectRPC20(gracefulCtx)
-		if err != nil {
-			logger.Error(ctx, "drpc connect", slog.Error(err))
-			gracefulCancel()
+	queuedLogs := l.logCache.get(log.agentToken)
+	if isAgentLogEmpty(log) {
+		if queuedLogs == nil {
 			return
 		}
-		go func() {
-			err := ls.SendLoop(gracefulCtx, arpc)
-			// if the send loop exits on its own without the context
-			// canceling, timeout the logger and force it to recreate.
-			if err != nil && ctx.Err() == nil {
-				l.loggerTimeout(log.agentToken)
-			}
-		}()
+	} else {
+		queuedLogs = l.logCache.push(log)
+	}
 
-		closeTimer := l.clock.AfterFunc(l.loggerTTL, func() {
-			logger.Info(ctx, "logger timeout firing")
-			l.loggerTimeout(log.agentToken)
-		})
-		lifecycle := agentLoggerLifecycle{
-			scriptLogger: sl,
-			close: func() {
-				// We could be stopping for reasons other than the timeout. If
-				// so, stop the timer.
-				closeTimer.Stop()
-				defer gracefulCancel()
-				timeout := l.clock.AfterFunc(5*time.Second, gracefulCancel)
-				defer timeout.Stop()
-				logger.Info(ctx, "logger closing")
-
-				if err := sl.Flush(gracefulCtx); err != nil {
-					// ctx err
-					logger.Warn(gracefulCtx, "timeout reached while flushing")
-					return
-				}
-
-				if err := ls.WaitUntilEmpty(gracefulCtx); err != nil {
-					// ctx err
-					logger.Warn(gracefulCtx, "timeout reached while waiting for log queue to empty")
-				}
-
-				_ = arpc.DRPCConn().Close()
-				client.SDK.HTTPClient.CloseIdleConnections()
-			},
+	lgr, ok := l.loggers[log.agentToken]
+	if !ok {
+		// skip if we're in a retry cooldown window
+		if rs := l.retries[log.agentToken]; rs != nil && rs.timer != nil {
+			return
 		}
-		lifecycle.closeTimer = closeTimer
-		l.loggers[log.agentToken] = lifecycle
-		lgr = lifecycle
+
+		var err error
+		lgr, err = l.newLogger(ctx, log, queuedLogs)
+		if err != nil {
+			l.scheduleRetry(ctx, log.agentToken)
+			return
+		}
+		l.loggers[log.agentToken] = lgr
 	}
 
 	lgr.resetCloseTimer(l.loggerTTL)
-	_ = lgr.scriptLogger.Send(ctx, queuedLogs...)
+	if len(queuedLogs) == 0 {
+		return
+	}
+	if err := lgr.scriptLogger.Send(ctx, queuedLogs...); err != nil {
+		l.scheduleRetry(ctx, log.agentToken)
+		return
+	}
+	l.clearRetry(log.agentToken)
 	l.logCache.delete(log.agentToken)
 }
 
@@ -518,6 +553,8 @@ func (l *logQueuer) processDelete(log agentLog) {
 		delete(l.loggers, log.agentToken)
 
 	}
+	l.clearRetry(log.agentToken)
+	l.logCache.delete(log.agentToken)
 	l.mu.Unlock()
 
 	if ok {
@@ -549,6 +586,64 @@ func (l *agentLoggerLifecycle) resetCloseTimer(ttl time.Duration) {
 	}
 }
 
+// retryState tracks exponential backoff for an agent token.
+type retryState struct {
+	delay time.Duration
+	timer *quartz.Timer
+}
+
+func (l *logQueuer) ensureRetryMap() {
+	if l.retries == nil {
+		l.retries = make(map[string]*retryState)
+	}
+}
+
+func (l *logQueuer) scheduleRetry(ctx context.Context, token string) {
+	l.ensureRetryMap()
+
+	rs := l.retries[token]
+	if rs == nil {
+		rs = &retryState{delay: time.Second}
+		l.retries[token] = rs
+	}
+
+	if rs.timer != nil {
+		return
+	}
+
+	if rs.delay < time.Second {
+		rs.delay = time.Second
+	} else if rs.delay > 30*time.Second {
+		rs.delay = 30 * time.Second
+	}
+
+	l.logger.Info(ctx, "scheduling retry", slog.F("delay", rs.delay.String()))
+
+	rs.timer = l.clock.AfterFunc(rs.delay, func() {
+		l.mu.Lock()
+		if cur := l.retries[token]; cur != nil {
+			cur.timer = nil
+		}
+		l.mu.Unlock()
+
+		l.q <- agentLog{op: opLog, agentToken: token}
+	})
+
+	rs.delay *= 2
+	if rs.delay > 30*time.Second {
+		rs.delay = 30 * time.Second
+	}
+}
+
+func (l *logQueuer) clearRetry(token string) {
+	if rs := l.retries[token]; rs != nil {
+		if rs.timer != nil {
+			rs.timer.Stop()
+		}
+		delete(l.retries, token)
+	}
+}
+
 func newColor(value ...color.Attribute) *color.Color {
 	c := color.New(value...)
 	c.EnableColor()
@@ -571,4 +666,16 @@ func (l *logCache) push(log agentLog) []agentsdk.Log {
 
 func (l *logCache) delete(token string) {
 	delete(l.logs, token)
+}
+
+func (l *logCache) get(token string) []agentsdk.Log {
+	logs, ok := l.logs[token]
+	if !ok {
+		return nil
+	}
+	return logs
+}
+
+func isAgentLogEmpty(log agentLog) bool {
+	return log.resourceName == "" && log.log.Output == "" && log.log.CreatedAt.IsZero()
 }
