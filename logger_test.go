@@ -600,7 +600,7 @@ func Test_logQueuer(t *testing.T) {
 		token := "test-token"
 
 		// Set up a retry state with a large delay
-		lq.ensureRetryMap()
+		lq.retries = make(map[string]*retryState)
 		lq.retries[token] = &retryState{delay: 20 * time.Second}
 
 		// Schedule a retry - should cap at 30 seconds

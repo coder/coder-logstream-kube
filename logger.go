@@ -592,14 +592,10 @@ type retryState struct {
 	timer *quartz.Timer
 }
 
-func (l *logQueuer) ensureRetryMap() {
+func (l *logQueuer) scheduleRetry(ctx context.Context, token string) {
 	if l.retries == nil {
 		l.retries = make(map[string]*retryState)
 	}
-}
-
-func (l *logQueuer) scheduleRetry(ctx context.Context, token string) {
-	l.ensureRetryMap()
 
 	rs := l.retries[token]
 	if rs == nil {
