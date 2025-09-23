@@ -511,6 +511,7 @@ func Test_logQueuer(t *testing.T) {
 			logCache: logCache{
 				logs: map[string][]agentsdk.Log{},
 			},
+			maxRetries: 10,
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -644,7 +645,7 @@ func Test_logQueuer(t *testing.T) {
 		require.NotNil(t, lq.retries[token])
 
 		// Clear the retry
-		lq.clearRetry(token)
+		lq.clearRetryLocked(token)
 		require.Nil(t, lq.retries[token])
 	})
 
@@ -672,6 +673,7 @@ func Test_logQueuer(t *testing.T) {
 			logCache: logCache{
 				logs: map[string][]agentsdk.Log{},
 			},
+			retries:    make(map[string]*retryState),
 			maxRetries: 2,
 		}
 
@@ -691,15 +693,31 @@ func Test_logQueuer(t *testing.T) {
 			},
 		}
 
-		// Wait for retry state to be cleared after exceeding maxRetries
 		require.Eventually(t, func() bool {
 			lq.mu.Lock()
 			defer lq.mu.Unlock()
 			rs := lq.retries[token]
-			return rs == nil
+			return rs != nil && rs.retryCount == 1
 		}, testutil.WaitShort, testutil.IntervalFast)
 
-		// Verify cache is also cleared
+		clock.Advance(time.Second)
+
+		require.Eventually(t, func() bool {
+			lq.mu.Lock()
+			defer lq.mu.Unlock()
+			rs := lq.retries[token]
+			return rs != nil && rs.retryCount == 2
+		}, testutil.WaitShort, testutil.IntervalFast)
+
+		clock.Advance(2 * time.Second)
+
+		require.Eventually(t, func() bool {
+			lq.mu.Lock()
+			defer lq.mu.Unlock()
+			rs := lq.retries[token]
+			return rs == nil || rs.exhausted
+		}, testutil.WaitShort, testutil.IntervalFast)
+
 		lq.mu.Lock()
 		cachedLogs := lq.logCache.get(token)
 		lq.mu.Unlock()

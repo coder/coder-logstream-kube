@@ -122,7 +122,7 @@ spec:
             {{- end }}
             {{- if .Values.maxRetries }}
             - name: CODER_MAX_RETRIES
-              value: {{ .Values.maxRetries }}
+              value: "{{ .Values.maxRetries }}"
             {{- end }}
           {{- with .Values.securityContext }}
           securityContext:

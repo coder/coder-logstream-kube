@@ -34,7 +34,8 @@ type podEventLoggerOptions struct {
 
 	logger      slog.Logger
 	logDebounce time.Duration
-	maxRetries  int
+	// maxRetries is the maximum number of retries for a log send failure.
+	maxRetries int
 
 	// The following fields are optional!
 	namespaces    []string
@@ -414,7 +415,9 @@ type logQueuer struct {
 	loggers   map[string]agentLoggerLifecycle
 	logCache  logCache
 
-	retries    map[string]*retryState
+	// retries maps agent tokens to their retry state for exponential backoff
+	retries map[string]*retryState
+	// maxRetries is the maximum number of retries for a log send failure.
 	maxRetries int
 }
 
@@ -436,7 +439,7 @@ func (l *logQueuer) work(ctx context.Context) {
 	}
 }
 
-func (l *logQueuer) newLogger(ctx context.Context, log agentLog, queuedLogs []agentsdk.Log) (agentLoggerLifecycle, error) {
+func (l *logQueuer) newLogger(ctx context.Context, log agentLog) (agentLoggerLifecycle, error) {
 	client := agentsdk.New(l.coderURL)
 	client.SetSessionToken(log.agentToken)
 	logger := l.logger.With(slog.F("resource_name", log.resourceName))
@@ -448,10 +451,9 @@ func (l *logQueuer) newLogger(ctx context.Context, log agentLog, queuedLogs []ag
 		DisplayName: "Kubernetes",
 	})
 	if err != nil {
-		// This shouldn't fail sending the log, as it only affects how they
-		// appear.
+		// Posting the log source failed, which affects how logs appear.
+		// We'll retry to ensure the log source is properly registered.
 		logger.Error(ctx, "post log source", slog.Error(err))
-		l.scheduleRetry(ctx, log.agentToken)
 		return agentLoggerLifecycle{}, err
 	}
 
@@ -466,7 +468,6 @@ func (l *logQueuer) newLogger(ctx context.Context, log agentLog, queuedLogs []ag
 	if err != nil {
 		logger.Error(ctx, "drpc connect", slog.Error(err))
 		gracefulCancel()
-		l.scheduleRetry(ctx, log.agentToken)
 		return agentLoggerLifecycle{}, err
 	}
 	go func() {
@@ -485,6 +486,8 @@ func (l *logQueuer) newLogger(ctx context.Context, log agentLog, queuedLogs []ag
 	lifecycle := agentLoggerLifecycle{
 		scriptLogger: sl,
 		close: func() {
+			defer arpc.DRPCConn().Close()
+			defer client.SDK.HTTPClient.CloseIdleConnections()
 			// We could be stopping for reasons other than the timeout. If
 			// so, stop the timer.
 			closeTimer.Stop()
@@ -503,9 +506,6 @@ func (l *logQueuer) newLogger(ctx context.Context, log agentLog, queuedLogs []ag
 				// ctx err
 				logger.Warn(gracefulCtx, "timeout reached while waiting for log queue to empty")
 			}
-
-			_ = arpc.DRPCConn().Close()
-			client.SDK.HTTPClient.CloseIdleConnections()
 		},
 	}
 	lifecycle.closeTimer = closeTimer
@@ -533,7 +533,7 @@ func (l *logQueuer) processLog(ctx context.Context, log agentLog) {
 		}
 
 		var err error
-		lgr, err = l.newLogger(ctx, log, queuedLogs)
+		lgr, err = l.newLogger(ctx, log)
 		if err != nil {
 			l.scheduleRetry(ctx, log.agentToken)
 			return
@@ -549,7 +549,7 @@ func (l *logQueuer) processLog(ctx context.Context, log agentLog) {
 		l.scheduleRetry(ctx, log.agentToken)
 		return
 	}
-	l.clearRetry(log.agentToken)
+	l.clearRetryLocked(log.agentToken)
 	l.logCache.delete(log.agentToken)
 }
 
@@ -558,9 +558,8 @@ func (l *logQueuer) processDelete(log agentLog) {
 	lgr, ok := l.loggers[log.agentToken]
 	if ok {
 		delete(l.loggers, log.agentToken)
-
 	}
-	l.clearRetry(log.agentToken)
+	l.clearRetryLocked(log.agentToken)
 	l.logCache.delete(log.agentToken)
 	l.mu.Unlock()
 
@@ -598,6 +597,7 @@ type retryState struct {
 	delay      time.Duration
 	timer      *quartz.Timer
 	retryCount int
+	exhausted  bool // prevent retry state recreation after max retries
 }
 
 func (l *logQueuer) scheduleRetry(ctx context.Context, token string) {
@@ -606,8 +606,13 @@ func (l *logQueuer) scheduleRetry(ctx context.Context, token string) {
 	}
 
 	rs := l.retries[token]
+
+	if rs != nil && rs.exhausted {
+		return
+	}
+
 	if rs == nil {
-		rs = &retryState{delay: time.Second}
+		rs = &retryState{delay: time.Second, retryCount: 0, exhausted: false}
 		l.retries[token] = rs
 	}
 
@@ -618,7 +623,11 @@ func (l *logQueuer) scheduleRetry(ctx context.Context, token string) {
 		l.logger.Error(ctx, "max retries exceeded",
 			slog.F("retryCount", rs.retryCount),
 			slog.F("maxRetries", l.maxRetries))
-		l.clearRetry(token)
+		rs.exhausted = true
+		if rs.timer != nil {
+			rs.timer.Stop()
+			rs.timer = nil
+		}
 		l.logCache.delete(token)
 		return
 	}
@@ -627,24 +636,18 @@ func (l *logQueuer) scheduleRetry(ctx context.Context, token string) {
 		return
 	}
 
-	if rs.delay < time.Second {
-		rs.delay = time.Second
-	} else if rs.delay > 30*time.Second {
-		rs.delay = 30 * time.Second
-	}
-
 	l.logger.Info(ctx, "scheduling retry",
 		slog.F("delay", rs.delay.String()),
 		slog.F("retryCount", rs.retryCount))
 
 	rs.timer = l.clock.AfterFunc(rs.delay, func() {
 		l.mu.Lock()
-		if cur := l.retries[token]; cur != nil {
-			cur.timer = nil
-		}
-		l.mu.Unlock()
+		defer l.mu.Unlock()
 
-		l.q <- agentLog{op: opLog, agentToken: token}
+		if cur := l.retries[token]; cur != nil && !cur.exhausted {
+			cur.timer = nil
+			l.q <- agentLog{op: opLog, agentToken: token}
+		}
 	})
 
 	rs.delay *= 2
@@ -653,7 +656,9 @@ func (l *logQueuer) scheduleRetry(ctx context.Context, token string) {
 	}
 }
 
-func (l *logQueuer) clearRetry(token string) {
+// clearRetryLocked clears the retry state for the given token.
+// The caller must hold the mutex lock.
+func (l *logQueuer) clearRetryLocked(token string) {
 	if rs := l.retries[token]; rs != nil {
 		if rs.timer != nil {
 			rs.timer.Stop()
