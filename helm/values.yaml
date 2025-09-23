@@ -5,6 +5,9 @@ url: ""
 # If unspecified or empty it will watch all namespaces.
 namespaces: []
 
+# maxRetries -- Maximum retry attempts for failed log sends (logs are discarded after this limit)
+maxRetries: 10
+
 # volumes -- A list of extra volumes to add to the coder-logstream pod.
 volumes:
   #   emptyDir: {}

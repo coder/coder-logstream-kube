@@ -34,6 +34,7 @@ type podEventLoggerOptions struct {
 
 	logger      slog.Logger
 	logDebounce time.Duration
+	maxRetries  int
 
 	// The following fields are optional!
 	namespaces    []string
@@ -50,6 +51,10 @@ func newPodEventLogger(ctx context.Context, opts podEventLoggerOptions) (*podEve
 	}
 	if opts.clock == nil {
 		opts.clock = quartz.NewReal()
+	}
+
+	if opts.maxRetries == 0 {
+		opts.maxRetries = 10
 	}
 
 	logCh := make(chan agentLog, 512)
@@ -75,6 +80,7 @@ func newPodEventLogger(ctx context.Context, opts podEventLoggerOptions) (*podEve
 			logCache: logCache{
 				logs: map[string][]agentsdk.Log{},
 			},
+			maxRetries: opts.maxRetries,
 		},
 	}
 
@@ -408,7 +414,8 @@ type logQueuer struct {
 	loggers   map[string]agentLoggerLifecycle
 	logCache  logCache
 
-	retries map[string]*retryState
+	retries    map[string]*retryState
+	maxRetries int
 }
 
 func (l *logQueuer) work(ctx context.Context) {
@@ -588,8 +595,9 @@ func (l *agentLoggerLifecycle) resetCloseTimer(ttl time.Duration) {
 
 // retryState tracks exponential backoff for an agent token.
 type retryState struct {
-	delay time.Duration
-	timer *quartz.Timer
+	delay      time.Duration
+	timer      *quartz.Timer
+	retryCount int
 }
 
 func (l *logQueuer) scheduleRetry(ctx context.Context, token string) {
@@ -603,6 +611,18 @@ func (l *logQueuer) scheduleRetry(ctx context.Context, token string) {
 		l.retries[token] = rs
 	}
 
+	rs.retryCount++
+
+	// If we've reached the max retries, clear the retry state and delete the log cache.
+	if rs.retryCount >= l.maxRetries {
+		l.logger.Error(ctx, "max retries exceeded",
+			slog.F("retryCount", rs.retryCount),
+			slog.F("maxRetries", l.maxRetries))
+		l.clearRetry(token)
+		l.logCache.delete(token)
+		return
+	}
+
 	if rs.timer != nil {
 		return
 	}
@@ -613,7 +633,9 @@ func (l *logQueuer) scheduleRetry(ctx context.Context, token string) {
 		rs.delay = 30 * time.Second
 	}
 
-	l.logger.Info(ctx, "scheduling retry", slog.F("delay", rs.delay.String()))
+	l.logger.Info(ctx, "scheduling retry",
+		slog.F("delay", rs.delay.String()),
+		slog.F("retryCount", rs.retryCount))
 
 	rs.timer = l.clock.AfterFunc(rs.delay, func() {
 		l.mu.Lock()

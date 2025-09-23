@@ -594,6 +594,7 @@ func Test_logQueuer(t *testing.T) {
 			logCache: logCache{
 				logs: map[string][]agentsdk.Log{},
 			},
+			maxRetries: 10,
 		}
 
 		ctx := context.Background()
@@ -601,17 +602,22 @@ func Test_logQueuer(t *testing.T) {
 
 		// Set up a retry state with a large delay
 		lq.retries = make(map[string]*retryState)
-		lq.retries[token] = &retryState{delay: 20 * time.Second}
+		lq.retries[token] = &retryState{
+			delay:      20 * time.Second,
+			retryCount: 0,
+		}
 
 		// Schedule a retry - should cap at 30 seconds
 		lq.scheduleRetry(ctx, token)
 
 		rs := lq.retries[token]
+		require.NotNil(t, rs)
 		require.Equal(t, 30*time.Second, rs.delay)
 
 		// Schedule another retry - should stay at 30 seconds
 		lq.scheduleRetry(ctx, token)
 		rs = lq.retries[token]
+		require.NotNil(t, rs)
 		require.Equal(t, 30*time.Second, rs.delay)
 	})
 
@@ -627,6 +633,7 @@ func Test_logQueuer(t *testing.T) {
 			logCache: logCache{
 				logs: map[string][]agentsdk.Log{},
 			},
+			maxRetries: 2,
 		}
 
 		ctx := context.Background()
@@ -639,6 +646,64 @@ func Test_logQueuer(t *testing.T) {
 		// Clear the retry
 		lq.clearRetry(token)
 		require.Nil(t, lq.retries[token])
+	})
+
+	t.Run("MaxRetries", func(t *testing.T) {
+		t.Parallel()
+
+		// Create a failing API that will reject connections
+		failingAPI := newFailingAgentAPI(t)
+		agentURL, err := url.Parse(failingAPI.server.URL)
+		require.NoError(t, err)
+		clock := quartz.NewMock(t)
+		ttl := time.Second
+
+		ch := make(chan agentLog, 10)
+		logger := slogtest.Make(t, &slogtest.Options{
+			IgnoreErrors: true,
+		})
+		lq := &logQueuer{
+			logger:    logger,
+			clock:     clock,
+			q:         ch,
+			coderURL:  agentURL,
+			loggerTTL: ttl,
+			loggers:   map[string]agentLoggerLifecycle{},
+			logCache: logCache{
+				logs: map[string][]agentsdk.Log{},
+			},
+			maxRetries: 2,
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		go lq.work(ctx)
+
+		token := "max-retry-token"
+		ch <- agentLog{
+			op:           opLog,
+			resourceName: "hello",
+			agentToken:   token,
+			log: agentsdk.Log{
+				CreatedAt: time.Now(),
+				Output:    "This is a log.",
+				Level:     codersdk.LogLevelInfo,
+			},
+		}
+
+		// Wait for retry state to be cleared after exceeding maxRetries
+		require.Eventually(t, func() bool {
+			lq.mu.Lock()
+			defer lq.mu.Unlock()
+			rs := lq.retries[token]
+			return rs == nil
+		}, testutil.WaitShort, testutil.IntervalFast)
+
+		// Verify cache is also cleared
+		lq.mu.Lock()
+		cachedLogs := lq.logCache.get(token)
+		lq.mu.Unlock()
+		require.Nil(t, cachedLogs)
 	})
 }
 

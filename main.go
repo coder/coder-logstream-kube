@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	"cdr.dev/slog"
@@ -30,6 +31,7 @@ func root() *cobra.Command {
 		kubeConfig    string
 		namespacesStr string
 		labelSelector string
+		maxRetriesStr string
 	)
 	cmd := &cobra.Command{
 		Use:   "coder-logstream-kube",
@@ -72,6 +74,11 @@ func root() *cobra.Command {
 				}
 			}
 
+			maxRetries, err := strconv.Atoi(maxRetriesStr)
+			if err != nil {
+				return fmt.Errorf("parse max retries: %w", err)
+			}
+
 			reporter, err := newPodEventLogger(cmd.Context(), podEventLoggerOptions{
 				coderURL:      parsedURL,
 				client:        client,
@@ -79,6 +86,7 @@ func root() *cobra.Command {
 				fieldSelector: fieldSelector,
 				labelSelector: labelSelector,
 				logger:        slog.Make(sloghuman.Sink(cmd.ErrOrStderr())).Leveled(slog.LevelDebug),
+				maxRetries:    maxRetries,
 			})
 			if err != nil {
 				return fmt.Errorf("create pod event reporter: %w", err)
@@ -97,6 +105,7 @@ func root() *cobra.Command {
 	cmd.Flags().StringVarP(&namespacesStr, "namespaces", "n", os.Getenv("CODER_NAMESPACES"), "List of namespaces to use when listing pods")
 	cmd.Flags().StringVarP(&fieldSelector, "field-selector", "f", "", "Field selector to use when listing pods")
 	cmd.Flags().StringVarP(&labelSelector, "label-selector", "l", "", "Label selector to use when listing pods")
+	cmd.Flags().StringVarP(&maxRetriesStr, "max-retries", "m", os.Getenv("CODER_MAX_RETRIES"), "Maximum retry attempts for failed log sends (logs are discarded after this limit)")
 
 	return cmd
 }
