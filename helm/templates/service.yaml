@@ -120,10 +120,6 @@ spec:
             - name: SSL_CERT_DIR
               value: {{ .Values.image.sslCertDir }}
             {{- end }}
-            {{- if .Values.maxRetries }}
-            - name: CODER_MAX_RETRIES
-              value: "{{ .Values.maxRetries }}"
-            {{- end }}
           {{- with .Values.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
