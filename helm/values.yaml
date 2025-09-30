@@ -92,7 +92,14 @@ labels: {}
 
 # securityContext -- Container-level security context
 # See: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
-securityContext: {}
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  allowPrivilegeEscalation: false
+  # Optional; enable after validation if the app never writes to disk:
+  # readOnlyRootFilesystem: true
+  #
   # allowPrivilegeEscalation: false
   # capabilities:
   #   drop:
@@ -101,3 +108,8 @@ securityContext: {}
   # runAsNonRoot: true
   # seccompProfile:
   #   type: RuntimeDefault
+
+podSecurityContext: {}
+# Optional, only if your cluster requires group ownership for mounted volumes:
+# podSecurityContext:
+#   fsGroup: 65532
