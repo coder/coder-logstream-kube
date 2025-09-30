@@ -486,6 +486,471 @@ func Test_logQueuer(t *testing.T) {
 		// wait for the client to disconnect
 		_ = testutil.RequireRecvCtx(ctx, t, api.disconnect)
 	})
+
+	t.Run("RetryMechanism", func(t *testing.T) {
+		t.Parallel()
+
+		// Create a failing API that will reject connections
+		failingAPI := newFailingAgentAPI(t)
+		agentURL, err := url.Parse(failingAPI.server.URL)
+		require.NoError(t, err)
+		clock := quartz.NewMock(t)
+		ttl := time.Second
+
+		ch := make(chan agentLog, 10)
+		logger := slogtest.Make(t, &slogtest.Options{
+			IgnoreErrors: true,
+		})
+		lq := &logQueuer{
+			logger:    logger,
+			clock:     clock,
+			q:         ch,
+			coderURL:  agentURL,
+			loggerTTL: ttl,
+			loggers:   map[string]agentLoggerLifecycle{},
+			logCache: logCache{
+				logs: map[string][]agentsdk.Log{},
+			},
+			maxRetries: 10,
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		go lq.work(ctx)
+
+		token := "retry-token"
+		ch <- agentLog{
+			op:           opLog,
+			resourceName: "hello",
+			agentToken:   token,
+			log: agentsdk.Log{
+				CreatedAt: time.Now(),
+				Output:    "This is a log.",
+				Level:     codersdk.LogLevelInfo,
+			},
+		}
+
+		// Wait for the initial failure to be processed and retry state to be created
+		require.Eventually(t, func() bool {
+			lq.mu.Lock()
+			defer lq.mu.Unlock()
+			rs := lq.retries[token]
+			return rs != nil && rs.timer != nil && rs.delay == 2*time.Second
+		}, testutil.WaitShort, testutil.IntervalFast)
+
+		// Verify retry state exists and has correct doubled delay (it gets doubled after scheduling)
+		lq.mu.Lock()
+		rs := lq.retries[token]
+		require.NotNil(t, rs)
+		require.Equal(t, 2*time.Second, rs.delay) // Delay gets doubled after scheduling
+		require.NotNil(t, rs.timer)
+		lq.mu.Unlock()
+
+		// Advance clock to trigger first retry
+		clock.Advance(time.Second)
+
+		// Wait for retry to be processed and delay to double again
+		require.Eventually(t, func() bool {
+			lq.mu.Lock()
+			defer lq.mu.Unlock()
+			rs := lq.retries[token]
+			return rs != nil && rs.delay == 4*time.Second
+		}, testutil.WaitShort, testutil.IntervalFast)
+
+		// Check that delay doubled again for next retry
+		lq.mu.Lock()
+		rs = lq.retries[token]
+		require.NotNil(t, rs)
+		require.Equal(t, 4*time.Second, rs.delay)
+		lq.mu.Unlock()
+
+		// Advance clock to trigger second retry
+		clock.Advance(2 * time.Second)
+
+		// Wait for retry to be processed and delay to double again
+		require.Eventually(t, func() bool {
+			lq.mu.Lock()
+			defer lq.mu.Unlock()
+			rs := lq.retries[token]
+			return rs != nil && rs.delay == 8*time.Second
+		}, testutil.WaitShort, testutil.IntervalFast)
+
+		// Check that delay doubled again
+		lq.mu.Lock()
+		rs = lq.retries[token]
+		require.NotNil(t, rs)
+		require.Equal(t, 8*time.Second, rs.delay)
+		lq.mu.Unlock()
+	})
+
+	t.Run("RetryMaxDelay", func(t *testing.T) {
+		t.Parallel()
+
+		clock := quartz.NewMock(t)
+		ch := make(chan agentLog, 10)
+		lq := &logQueuer{
+			logger: slogtest.Make(t, nil),
+			clock:  clock,
+			q:      ch,
+			logCache: logCache{
+				logs: map[string][]agentsdk.Log{},
+			},
+			maxRetries: 10,
+		}
+
+		ctx := context.Background()
+		token := "test-token"
+
+		// Set up a retry state with a large delay
+		lq.retries = make(map[string]*retryState)
+		lq.retries[token] = &retryState{
+			delay:      20 * time.Second,
+			retryCount: 0,
+		}
+
+		// Schedule a retry - should cap at 30 seconds
+		lq.scheduleRetry(ctx, token)
+
+		rs := lq.retries[token]
+		require.NotNil(t, rs)
+		require.Equal(t, 30*time.Second, rs.delay)
+
+		// Schedule another retry - should stay at 30 seconds
+		lq.scheduleRetry(ctx, token)
+		rs = lq.retries[token]
+		require.NotNil(t, rs)
+		require.Equal(t, 30*time.Second, rs.delay)
+	})
+
+	t.Run("ClearRetry", func(t *testing.T) {
+		t.Parallel()
+
+		clock := quartz.NewMock(t)
+		ch := make(chan agentLog, 10)
+		lq := &logQueuer{
+			logger: slogtest.Make(t, nil),
+			clock:  clock,
+			q:      ch,
+			logCache: logCache{
+				logs: map[string][]agentsdk.Log{},
+			},
+			maxRetries: 2,
+		}
+
+		ctx := context.Background()
+		token := "test-token"
+
+		// Schedule a retry
+		lq.scheduleRetry(ctx, token)
+		require.NotNil(t, lq.retries[token])
+
+		// Clear the retry
+		lq.clearRetryLocked(token)
+		require.Nil(t, lq.retries[token])
+	})
+
+	t.Run("MaxRetries", func(t *testing.T) {
+		t.Parallel()
+
+		// Create a failing API that will reject connections
+		failingAPI := newFailingAgentAPI(t)
+		agentURL, err := url.Parse(failingAPI.server.URL)
+		require.NoError(t, err)
+		clock := quartz.NewMock(t)
+		ttl := time.Second
+
+		ch := make(chan agentLog, 10)
+		logger := slogtest.Make(t, &slogtest.Options{
+			IgnoreErrors: true,
+		})
+		lq := &logQueuer{
+			logger:    logger,
+			clock:     clock,
+			q:         ch,
+			coderURL:  agentURL,
+			loggerTTL: ttl,
+			loggers:   map[string]agentLoggerLifecycle{},
+			logCache: logCache{
+				logs: map[string][]agentsdk.Log{},
+			},
+			retries:    make(map[string]*retryState),
+			maxRetries: 2,
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		go lq.work(ctx)
+
+		token := "max-retry-token"
+		ch <- agentLog{
+			op:           opLog,
+			resourceName: "hello",
+			agentToken:   token,
+			log: agentsdk.Log{
+				CreatedAt: time.Now(),
+				Output:    "This is a log.",
+				Level:     codersdk.LogLevelInfo,
+			},
+		}
+
+		require.Eventually(t, func() bool {
+			lq.mu.Lock()
+			defer lq.mu.Unlock()
+			rs := lq.retries[token]
+			return rs != nil && rs.retryCount == 1
+		}, testutil.WaitShort, testutil.IntervalFast)
+
+		clock.Advance(time.Second)
+
+		require.Eventually(t, func() bool {
+			lq.mu.Lock()
+			defer lq.mu.Unlock()
+			rs := lq.retries[token]
+			return rs != nil && rs.retryCount == 2
+		}, testutil.WaitShort, testutil.IntervalFast)
+
+		clock.Advance(2 * time.Second)
+
+		require.Eventually(t, func() bool {
+			lq.mu.Lock()
+			defer lq.mu.Unlock()
+			rs := lq.retries[token]
+			return rs == nil || rs.exhausted
+		}, testutil.WaitShort, testutil.IntervalFast)
+
+		lq.mu.Lock()
+		cachedLogs := lq.logCache.get(token)
+		lq.mu.Unlock()
+		require.Nil(t, cachedLogs)
+	})
+}
+
+func Test_logCache(t *testing.T) {
+	t.Parallel()
+
+	t.Run("PushAndGet", func(t *testing.T) {
+		t.Parallel()
+
+		lc := logCache{
+			logs: map[string][]agentsdk.Log{},
+		}
+
+		token := "test-token"
+
+		// Initially should return nil
+		logs := lc.get(token)
+		require.Nil(t, logs)
+
+		// Push first log
+		log1 := agentLog{
+			agentToken: token,
+			log: agentsdk.Log{
+				CreatedAt: time.Now(),
+				Output:    "First log",
+				Level:     codersdk.LogLevelInfo,
+			},
+		}
+		returnedLogs := lc.push(log1)
+		require.Len(t, returnedLogs, 1)
+		require.Equal(t, "First log", returnedLogs[0].Output)
+
+		// Get should return the cached logs
+		cachedLogs := lc.get(token)
+		require.Len(t, cachedLogs, 1)
+		require.Equal(t, "First log", cachedLogs[0].Output)
+
+		// Push second log to same token
+		log2 := agentLog{
+			agentToken: token,
+			log: agentsdk.Log{
+				CreatedAt: time.Now(),
+				Output:    "Second log",
+				Level:     codersdk.LogLevelWarn,
+			},
+		}
+		returnedLogs = lc.push(log2)
+		require.Len(t, returnedLogs, 2)
+		require.Equal(t, "First log", returnedLogs[0].Output)
+		require.Equal(t, "Second log", returnedLogs[1].Output)
+
+		// Get should return both logs
+		cachedLogs = lc.get(token)
+		require.Len(t, cachedLogs, 2)
+		require.Equal(t, "First log", cachedLogs[0].Output)
+		require.Equal(t, "Second log", cachedLogs[1].Output)
+	})
+
+	t.Run("Delete", func(t *testing.T) {
+		t.Parallel()
+
+		lc := logCache{
+			logs: map[string][]agentsdk.Log{},
+		}
+
+		token := "test-token"
+
+		// Push a log
+		log := agentLog{
+			agentToken: token,
+			log: agentsdk.Log{
+				CreatedAt: time.Now(),
+				Output:    "Test log",
+				Level:     codersdk.LogLevelInfo,
+			},
+		}
+		lc.push(log)
+
+		// Verify it exists
+		cachedLogs := lc.get(token)
+		require.Len(t, cachedLogs, 1)
+
+		// Delete it
+		lc.delete(token)
+
+		// Should return nil now
+		cachedLogs = lc.get(token)
+		require.Nil(t, cachedLogs)
+	})
+
+	t.Run("MultipleTokens", func(t *testing.T) {
+		t.Parallel()
+
+		lc := logCache{
+			logs: map[string][]agentsdk.Log{},
+		}
+
+		token1 := "token1"
+		token2 := "token2"
+
+		// Push logs for different tokens
+		log1 := agentLog{
+			agentToken: token1,
+			log: agentsdk.Log{
+				CreatedAt: time.Now(),
+				Output:    "Log for token1",
+				Level:     codersdk.LogLevelInfo,
+			},
+		}
+		log2 := agentLog{
+			agentToken: token2,
+			log: agentsdk.Log{
+				CreatedAt: time.Now(),
+				Output:    "Log for token2",
+				Level:     codersdk.LogLevelError,
+			},
+		}
+
+		lc.push(log1)
+		lc.push(log2)
+
+		// Each token should have its own logs
+		logs1 := lc.get(token1)
+		require.Len(t, logs1, 1)
+		require.Equal(t, "Log for token1", logs1[0].Output)
+
+		logs2 := lc.get(token2)
+		require.Len(t, logs2, 1)
+		require.Equal(t, "Log for token2", logs2[0].Output)
+
+		// Delete one token shouldn't affect the other
+		lc.delete(token1)
+		require.Nil(t, lc.get(token1))
+
+		logs2 = lc.get(token2)
+		require.Len(t, logs2, 1)
+		require.Equal(t, "Log for token2", logs2[0].Output)
+	})
+
+	t.Run("EmptyLogHandling", func(t *testing.T) {
+		t.Parallel()
+
+		api := newFakeAgentAPI(t)
+		agentURL, err := url.Parse(api.server.URL)
+		require.NoError(t, err)
+		clock := quartz.NewMock(t)
+		ttl := time.Second
+
+		ch := make(chan agentLog, 10)
+		lq := &logQueuer{
+			logger:    slogtest.Make(t, nil),
+			clock:     clock,
+			q:         ch,
+			coderURL:  agentURL,
+			loggerTTL: ttl,
+			loggers:   map[string]agentLoggerLifecycle{},
+			logCache: logCache{
+				logs: map[string][]agentsdk.Log{},
+			},
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		go lq.work(ctx)
+
+		token := "test-token"
+
+		// Send an empty log first - should be ignored since no cached logs exist
+		emptyLog := agentLog{
+			op:           opLog,
+			resourceName: "",
+			agentToken:   token,
+			log: agentsdk.Log{
+				Output:    "",
+				CreatedAt: time.Time{},
+			},
+		}
+		ch <- emptyLog
+
+		// Wait to ensure processing completes - no logger should be created for empty log with no cache
+		require.Eventually(t, func() bool {
+			lq.mu.Lock()
+			defer lq.mu.Unlock()
+			_, exists := lq.loggers[token]
+			return !exists
+		}, testutil.WaitShort, testutil.IntervalFast)
+
+		// No logger should be created for empty log with no cache
+		lq.mu.Lock()
+		_, exists := lq.loggers[token]
+		require.False(t, exists)
+		lq.mu.Unlock()
+
+		// Now send a real log to establish the logger
+		realLog := agentLog{
+			op:           opLog,
+			resourceName: "hello",
+			agentToken:   token,
+			log: agentsdk.Log{
+				CreatedAt: time.Now(),
+				Output:    "Real log",
+				Level:     codersdk.LogLevelInfo,
+			},
+		}
+		ch <- realLog
+
+		// Should create logger and send log
+		_ = testutil.RequireRecvCtx(ctx, t, api.logSource)
+		logs := testutil.RequireRecvCtx(ctx, t, api.logs)
+		require.Len(t, logs, 1)
+		require.Contains(t, logs[0].Output, "Real log")
+
+		// Now send empty log - should trigger flush of any cached logs
+		ch <- emptyLog
+
+		// Wait for processing - logger should still exist after empty log
+		require.Eventually(t, func() bool {
+			lq.mu.Lock()
+			defer lq.mu.Unlock()
+			_, exists := lq.loggers[token]
+			return exists
+		}, testutil.WaitShort, testutil.IntervalFast)
+
+		// Logger should still exist
+		lq.mu.Lock()
+		_, exists = lq.loggers[token]
+		require.True(t, exists)
+		lq.mu.Unlock()
+	})
 }
 
 func newFakeAgentAPI(t *testing.T) *fakeAgentAPI {
@@ -542,6 +1007,21 @@ func newFakeAgentAPI(t *testing.T) *fakeAgentAPI {
 		})
 
 		rtr.ServeHTTP(w, r)
+	}))
+
+	return fakeAPI
+}
+
+func newFailingAgentAPI(t *testing.T) *fakeAgentAPI {
+	fakeAPI := &fakeAgentAPI{
+		disconnect: make(chan struct{}),
+		logs:       make(chan []*proto.Log),
+		logSource:  make(chan agentsdk.PostLogSourceRequest),
+	}
+
+	// Create a server that always returns 401 Unauthorized errors
+	fakeAPI.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 	}))
 
 	return fakeAPI

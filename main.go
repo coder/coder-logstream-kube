@@ -79,6 +79,7 @@ func root() *cobra.Command {
 				fieldSelector: fieldSelector,
 				labelSelector: labelSelector,
 				logger:        slog.Make(sloghuman.Sink(cmd.ErrOrStderr())).Leveled(slog.LevelDebug),
+				maxRetries:    15, // 15 retries is the default max retries for a log send failure.
 			})
 			if err != nil {
 				return fmt.Errorf("create pod event reporter: %w", err)
