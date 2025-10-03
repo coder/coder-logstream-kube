@@ -97,10 +97,6 @@ securityContext:
   runAsUser: 65532
   runAsGroup: 65532
   allowPrivilegeEscalation: false
-  # Optional; enable after validation if the app never writes to disk:
-  # readOnlyRootFilesystem: true
-  #
-  # allowPrivilegeEscalation: false
   # capabilities:
   #   drop:
   #   - ALL
