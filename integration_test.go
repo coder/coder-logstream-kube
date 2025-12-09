@@ -20,7 +20,6 @@ import (
 
 	"cdr.dev/slog"
 	"cdr.dev/slog/sloggers/slogtest"
-	"github.com/coder/quartz"
 )
 
 // getKubeClient creates a Kubernetes client from the default kubeconfig.
@@ -126,20 +125,19 @@ func TestIntegration_PodEvents(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create the pod event logger
-	clock := quartz.NewMock(t)
+	// Note: We don't set clock, so it uses a real clock for integration tests
 	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
 		client:      client,
 		coderURL:    agentURL,
 		namespaces:  []string{namespace},
 		logger:      slogtest.Make(t, nil).Leveled(slog.LevelDebug),
-		logDebounce: 30 * time.Second,
-		clock:       clock,
+		logDebounce: 5 * time.Second, // Use shorter debounce for faster tests
 	})
 	require.NoError(t, err)
 	defer reporter.Close()
 
 	// Wait a bit for informers to sync
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(1 * time.Second)
 
 	// Create a pod with CODER_AGENT_TOKEN
 	pod := &corev1.Pod{
@@ -223,20 +221,19 @@ func TestIntegration_ReplicaSetEvents(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create the pod event logger
-	clock := quartz.NewMock(t)
+	// Note: We don't set clock, so it uses a real clock for integration tests
 	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
 		client:      client,
 		coderURL:    agentURL,
 		namespaces:  []string{namespace},
 		logger:      slogtest.Make(t, nil).Leveled(slog.LevelDebug),
-		logDebounce: 30 * time.Second,
-		clock:       clock,
+		logDebounce: 5 * time.Second, // Use shorter debounce for faster tests
 	})
 	require.NoError(t, err)
 	defer reporter.Close()
 
 	// Wait a bit for informers to sync
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(1 * time.Second)
 
 	// Create a ReplicaSet with CODER_AGENT_TOKEN
 	replicas := int32(1)
@@ -338,20 +335,19 @@ func TestIntegration_MultiNamespace(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create the pod event logger watching both namespaces
-	clock := quartz.NewMock(t)
+	// Note: We don't set clock, so it uses a real clock for integration tests
 	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
 		client:      client,
 		coderURL:    agentURL,
 		namespaces:  []string{namespace1, namespace2},
 		logger:      slogtest.Make(t, nil).Leveled(slog.LevelDebug),
-		logDebounce: 30 * time.Second,
-		clock:       clock,
+		logDebounce: 5 * time.Second, // Use shorter debounce for faster tests
 	})
 	require.NoError(t, err)
 	defer reporter.Close()
 
 	// Wait for informers to sync
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(1 * time.Second)
 
 	// Create a pod in namespace1
 	pod1 := &corev1.Pod{
@@ -442,21 +438,20 @@ func TestIntegration_LabelSelector(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create the pod event logger with a label selector
-	clock := quartz.NewMock(t)
+	// Note: We don't set clock, so it uses a real clock for integration tests
 	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
 		client:        client,
 		coderURL:      agentURL,
 		namespaces:    []string{namespace},
 		labelSelector: "coder-workspace=true",
 		logger:        slogtest.Make(t, nil).Leveled(slog.LevelDebug),
-		logDebounce:   30 * time.Second,
-		clock:         clock,
+		logDebounce:   5 * time.Second, // Use shorter debounce for faster tests
 	})
 	require.NoError(t, err)
 	defer reporter.Close()
 
 	// Wait for informers to sync
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(1 * time.Second)
 
 	// Create a pod WITHOUT the matching label - should be ignored
 	podNoLabel := &corev1.Pod{
