@@ -333,6 +333,7 @@ func (p *podEventLogger) sendDelete(token string) {
 	}
 }
 
+// Close stops the pod event logger and releases all resources.
 func (p *podEventLogger) Close() error {
 	p.cancelFunc()
 	close(p.stopChan)

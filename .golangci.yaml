@@ -10,23 +10,20 @@ linters:
     - ineffassign
     - misspell
     - revive
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+        - shadow
+    misspell:
+      locale: US
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - "checkPrivateReceivers"
 
 formatters:
   enable:
     - goimports
-
-linters-settings:
-  govet:
-    enable-all: true
-    disable:
-      - fieldalignment
-      - shadow
-
-  misspell:
-    locale: US
-
-  revive:
-    rules:
-      - name: exported
-        arguments:
-          - "checkPrivateReceivers"
