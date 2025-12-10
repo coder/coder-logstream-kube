@@ -989,7 +989,9 @@ func newFakeAgentAPI(t *testing.T) *fakeAgentAPI {
 			}
 
 			ctx, wsNetConn := codersdk.WebsocketNetConn(ctx, conn, websocket.MessageBinary)
-			defer wsNetConn.Close()
+			defer func() {
+				_ = wsNetConn.Close()
+			}()
 
 			config := yamux.DefaultConfig()
 			config.LogOutput = io.Discard
@@ -1012,7 +1014,7 @@ func newFakeAgentAPI(t *testing.T) *fakeAgentAPI {
 	return fakeAPI
 }
 
-func newFailingAgentAPI(t *testing.T) *fakeAgentAPI {
+func newFailingAgentAPI(_ *testing.T) *fakeAgentAPI {
 	fakeAPI := &fakeAgentAPI{
 		disconnect: make(chan struct{}),
 		logs:       make(chan []*proto.Log),
@@ -1020,7 +1022,7 @@ func newFailingAgentAPI(t *testing.T) *fakeAgentAPI {
 	}
 
 	// Create a server that always returns 401 Unauthorized errors
-	fakeAPI.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	fakeAPI.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 	}))
 

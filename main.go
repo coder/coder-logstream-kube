@@ -34,7 +34,7 @@ func root() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "coder-logstream-kube",
 		Short: "Stream Kubernetes Pod events to the Coder startup logs.",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			if coderURL == "" {
 				return fmt.Errorf("--coder-url is required")
 			}
@@ -84,7 +84,9 @@ func root() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("create pod event reporter: %w", err)
 			}
-			defer reporter.Close()
+			defer func() {
+				_ = reporter.Close()
+			}()
 			select {
 			case err := <-reporter.errChan:
 				return fmt.Errorf("pod event reporter: %w", err)

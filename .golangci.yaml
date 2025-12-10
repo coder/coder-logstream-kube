@@ -1,0 +1,29 @@
+# See https://golangci-lint.run/usage/configuration/
+version: "2"
+
+linters:
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - ineffassign
+    - misspell
+    - revive
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+        - shadow
+    misspell:
+      locale: US
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - "checkPrivateReceivers"
+
+formatters:
+  enable:
+    - goimports

@@ -1,3 +1,5 @@
+// Package main implements coder-logstream-kube, a Kubernetes controller
+// that streams pod logs to the Coder agent API.
 package main
 
 import (
@@ -87,7 +89,9 @@ func newPodEventLogger(ctx context.Context, opts podEventLoggerOptions) (*podEve
 
 	// If no namespaces are provided, we listen for events in all namespaces.
 	if len(opts.namespaces) == 0 {
-		reporter.initNamespace("")
+		if err := reporter.initNamespace(""); err != nil {
+			return nil, fmt.Errorf("init namespace: %w", err)
+		}
 	} else {
 		for _, namespace := range opts.namespaces {
 			if err := reporter.initNamespace(namespace); err != nil {
@@ -329,6 +333,7 @@ func (p *podEventLogger) sendDelete(token string) {
 	}
 }
 
+// Close stops the pod event logger and releases all resources.
 func (p *podEventLogger) Close() error {
 	p.cancelFunc()
 	close(p.stopChan)
@@ -486,7 +491,9 @@ func (l *logQueuer) newLogger(ctx context.Context, log agentLog) (agentLoggerLif
 	lifecycle := agentLoggerLifecycle{
 		scriptLogger: sl,
 		close: func() {
-			defer arpc.DRPCConn().Close()
+			defer func() {
+				_ = arpc.DRPCConn().Close()
+			}()
 			defer client.SDK.HTTPClient.CloseIdleConnections()
 			// We could be stopping for reasons other than the timeout. If
 			// so, stop the timer.
