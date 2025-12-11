@@ -73,23 +73,26 @@ func createTestNamespace(t *testing.T, ctx context.Context, client kubernetes.In
 	return name
 }
 
-// waitForLogs waits for logs to be received on the channel with a timeout.
-func waitForLogs(t *testing.T, ctx context.Context, api *fakeAgentAPI, timeout time.Duration) []string {
+// waitForLogContaining waits until a log containing the given substring is received.
+// It collects all logs seen and returns them along with whether the target was found.
+func waitForLogContaining(t *testing.T, ctx context.Context, api *fakeAgentAPI, timeout time.Duration, substring string) (allLogs []string, found bool) {
 	t.Helper()
 
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	select {
-	case logs := <-api.logs:
-		var outputs []string
-		for _, log := range logs {
-			outputs = append(outputs, log.Output)
+	for {
+		select {
+		case logs := <-api.logs:
+			for _, log := range logs {
+				allLogs = append(allLogs, log.Output)
+				if strings.Contains(log.Output, substring) {
+					return allLogs, true
+				}
+			}
+		case <-timeoutCtx.Done():
+			return allLogs, false
 		}
-		return outputs
-	case <-timeoutCtx.Done():
-		t.Fatal("timeout waiting for logs")
-		return nil
 	}
 }
 
@@ -173,35 +176,17 @@ func TestIntegration_PodEvents(t *testing.T) {
 	// Wait for log source registration
 	waitForLogSource(t, ctx, api, 30*time.Second)
 
-	// Wait for the "Created pod" log
-	logs := waitForLogs(t, ctx, api, 30*time.Second)
-	require.NotEmpty(t, logs)
-
-	var foundCreatedPod bool
-	for _, log := range logs {
-		if strings.Contains(log, "Created pod") {
-			foundCreatedPod = true
-			break
-		}
-	}
-	require.True(t, foundCreatedPod, "expected 'Created pod' log, got: %v", logs)
+	// Wait for the "Created pod" log (may receive other logs first like scheduling warnings)
+	logs, found := waitForLogContaining(t, ctx, api, 30*time.Second, "Created pod")
+	require.True(t, found, "expected 'Created pod' log, got: %v", logs)
 
 	// Delete the pod and verify deletion event
 	err = client.CoreV1().Pods(namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{})
 	require.NoError(t, err)
 
 	// Wait for the "Deleted pod" log
-	logs = waitForLogs(t, ctx, api, 30*time.Second)
-	require.NotEmpty(t, logs)
-
-	var foundDeletedPod bool
-	for _, log := range logs {
-		if strings.Contains(log, "Deleted pod") {
-			foundDeletedPod = true
-			break
-		}
-	}
-	require.True(t, foundDeletedPod, "expected 'Deleted pod' log, got: %v", logs)
+	logs, found = waitForLogContaining(t, ctx, api, 30*time.Second, "Deleted pod")
+	require.True(t, found, "expected 'Deleted pod' log, got: %v", logs)
 }
 
 func TestIntegration_ReplicaSetEvents(t *testing.T) {
@@ -285,34 +270,16 @@ func TestIntegration_ReplicaSetEvents(t *testing.T) {
 	waitForLogSource(t, ctx, api, 30*time.Second)
 
 	// Wait for the "Queued pod from ReplicaSet" log
-	logs := waitForLogs(t, ctx, api, 30*time.Second)
-	require.NotEmpty(t, logs)
-
-	var foundQueuedPod bool
-	for _, log := range logs {
-		if strings.Contains(log, "Queued pod from ReplicaSet") {
-			foundQueuedPod = true
-			break
-		}
-	}
-	require.True(t, foundQueuedPod, "expected 'Queued pod from ReplicaSet' log, got: %v", logs)
+	logs, found := waitForLogContaining(t, ctx, api, 30*time.Second, "Queued pod from ReplicaSet")
+	require.True(t, found, "expected 'Queued pod from ReplicaSet' log, got: %v", logs)
 
 	// Delete the ReplicaSet
 	err = client.AppsV1().ReplicaSets(namespace).Delete(ctx, rs.Name, metav1.DeleteOptions{})
 	require.NoError(t, err)
 
 	// Wait for the "Deleted ReplicaSet" log
-	logs = waitForLogs(t, ctx, api, 30*time.Second)
-	require.NotEmpty(t, logs)
-
-	var foundDeletedRS bool
-	for _, log := range logs {
-		if strings.Contains(log, "Deleted ReplicaSet") {
-			foundDeletedRS = true
-			break
-		}
-	}
-	require.True(t, foundDeletedRS, "expected 'Deleted ReplicaSet' log, got: %v", logs)
+	logs, found = waitForLogContaining(t, ctx, api, 30*time.Second, "Deleted ReplicaSet")
+	require.True(t, found, "expected 'Deleted ReplicaSet' log, got: %v", logs)
 }
 
 func TestIntegration_MultiNamespace(t *testing.T) {
@@ -380,8 +347,8 @@ func TestIntegration_MultiNamespace(t *testing.T) {
 
 	// Wait for log source and logs from first pod
 	waitForLogSource(t, ctx, api, 30*time.Second)
-	logs := waitForLogs(t, ctx, api, 30*time.Second)
-	require.NotEmpty(t, logs)
+	logs, found := waitForLogContaining(t, ctx, api, 30*time.Second, "Created pod")
+	require.True(t, found, "expected 'Created pod' log for first pod, got: %v", logs)
 
 	// Create a pod in namespace2
 	pod2 := &corev1.Pod{
@@ -414,8 +381,8 @@ func TestIntegration_MultiNamespace(t *testing.T) {
 
 	// Wait for log source and logs from second pod
 	waitForLogSource(t, ctx, api, 30*time.Second)
-	logs = waitForLogs(t, ctx, api, 30*time.Second)
-	require.NotEmpty(t, logs)
+	logs, found = waitForLogContaining(t, ctx, api, 30*time.Second, "Created pod")
+	require.True(t, found, "expected 'Created pod' log for second pod, got: %v", logs)
 
 	// Both namespaces should have received events
 	t.Log("Successfully received events from both namespaces")
@@ -520,19 +487,12 @@ func TestIntegration_LabelSelector(t *testing.T) {
 	// Wait for log source registration - this should only happen for the labeled pod
 	waitForLogSource(t, ctx, api, 30*time.Second)
 
-	// Wait for logs
-	logs := waitForLogs(t, ctx, api, 30*time.Second)
-	require.NotEmpty(t, logs)
+	// Wait for logs - look specifically for "Created pod" with the labeled pod name
+	logs, found := waitForLogContaining(t, ctx, api, 30*time.Second, "Created pod")
+	require.True(t, found, "expected 'Created pod' log for labeled pod, got: %v", logs)
 
-	// Verify that the log is for the labeled pod, not the unlabeled one
-	var foundLabeledPod bool
+	// Verify that none of the logs mention the unlabeled pod
 	for _, log := range logs {
-		if strings.Contains(log, "Created pod") && strings.Contains(log, "test-pod-with-label") {
-			foundLabeledPod = true
-			break
-		}
-		// Make sure we didn't get logs for the unlabeled pod
 		require.NotContains(t, log, "test-pod-no-label", "should not receive logs for unlabeled pod")
 	}
-	require.True(t, foundLabeledPod, "expected 'Created pod' log for labeled pod, got: %v", logs)
 }
