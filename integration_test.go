@@ -24,6 +24,8 @@ import (
 
 // getKubeClient creates a Kubernetes client from the default kubeconfig.
 // It will use KUBECONFIG env var if set, otherwise ~/.kube/config.
+// It also verifies the cluster is a KinD cluster to prevent accidentally
+// running tests against production clusters.
 func getKubeClient(t *testing.T) kubernetes.Interface {
 	t.Helper()
 
@@ -36,6 +38,25 @@ func getKubeClient(t *testing.T) kubernetes.Interface {
 
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	require.NoError(t, err, "failed to build kubeconfig")
+
+	// Safety check: ensure we're connecting to a KinD cluster.
+	// KinD clusters run on localhost or have "kind" in the host.
+	// This prevents accidentally running destructive tests against production clusters.
+	if config.Host != "" {
+		isKind := strings.Contains(config.Host, "127.0.0.1") ||
+			strings.Contains(config.Host, "localhost") ||
+			strings.Contains(strings.ToLower(config.Host), "kind")
+		if !isKind {
+			t.Fatalf("Safety check failed: integration tests must run against a KinD cluster. "+
+				"Current context points to %q. Set KUBECONFIG to a KinD cluster config or "+
+				"set INTEGRATION_TEST_UNSAFE=1 to bypass this check.", config.Host)
+		}
+	}
+
+	// Allow bypassing the safety check for CI or special cases
+	if os.Getenv("INTEGRATION_TEST_UNSAFE") == "1" {
+		t.Log("WARNING: INTEGRATION_TEST_UNSAFE=1 is set, bypassing KinD cluster check")
+	}
 
 	client, err := kubernetes.NewForConfig(config)
 	require.NoError(t, err, "failed to create kubernetes client")
