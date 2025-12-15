@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -117,6 +118,39 @@ type podEventLogger struct {
 	lq    *logQueuer
 }
 
+// resolveEnvValue resolves the value of an environment variable, supporting both
+// direct values and secretKeyRef references. Returns empty string if the value
+// cannot be resolved (e.g., optional secret not found).
+func (p *podEventLogger) resolveEnvValue(ctx context.Context, namespace string, env corev1.EnvVar) (string, error) {
+	// Direct value takes precedence (existing behavior)
+	if env.Value != "" {
+		return env.Value, nil
+	}
+
+	// Check for secretKeyRef
+	if env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
+		ref := env.ValueFrom.SecretKeyRef
+		secret, err := p.client.CoreV1().Secrets(namespace).Get(ctx, ref.Name, v1.GetOptions{})
+		if err != nil {
+			// Handle optional secrets gracefully - only ignore NotFound errors
+			if ref.Optional != nil && *ref.Optional && k8serrors.IsNotFound(err) {
+				return "", nil
+			}
+			return "", fmt.Errorf("get secret %s: %w", ref.Name, err)
+		}
+		value, ok := secret.Data[ref.Key]
+		if !ok {
+			if ref.Optional != nil && *ref.Optional {
+				return "", nil
+			}
+			return "", fmt.Errorf("secret %s has no key %s", ref.Name, ref.Key)
+		}
+		return string(value), nil
+	}
+
+	return "", nil
+}
+
 // initNamespace starts the informer factory and registers event handlers for a given namespace.
 // If provided namespace is empty, it will start the informer factory and register event handlers for all namespaces.
 func (p *podEventLogger) initNamespace(namespace string) error {
@@ -157,15 +191,28 @@ func (p *podEventLogger) initNamespace(namespace string) error {
 					if env.Name != "CODER_AGENT_TOKEN" {
 						continue
 					}
+
+					token, err := p.resolveEnvValue(p.ctx, pod.Namespace, env)
+					if err != nil {
+						p.logger.Warn(p.ctx, "failed to resolve CODER_AGENT_TOKEN",
+							slog.F("pod", pod.Name),
+							slog.F("namespace", pod.Namespace),
+							slog.Error(err))
+						continue
+					}
+					if token == "" {
+						continue
+					}
+
 					registered = true
-					p.tc.setPodToken(pod.Name, env.Value)
+					p.tc.setPodToken(pod.Name, token)
 
 					// We don't want to add logs to workspaces that are already started!
 					if !pod.CreationTimestamp.After(startTime) {
 						continue
 					}
 
-					p.sendLog(pod.Name, env.Value, agentsdk.Log{
+					p.sendLog(pod.Name, token, agentsdk.Log{
 						CreatedAt: time.Now(),
 						Output:    fmt.Sprintf("🐳 %s: %s", newColor(color.Bold).Sprint("Created pod"), pod.Name),
 						Level:     codersdk.LogLevelInfo,
@@ -218,10 +265,23 @@ func (p *podEventLogger) initNamespace(namespace string) error {
 					if env.Name != "CODER_AGENT_TOKEN" {
 						continue
 					}
-					registered = true
-					p.tc.setReplicaSetToken(replicaSet.Name, env.Value)
 
-					p.sendLog(replicaSet.Name, env.Value, agentsdk.Log{
+					token, err := p.resolveEnvValue(p.ctx, replicaSet.Namespace, env)
+					if err != nil {
+						p.logger.Warn(p.ctx, "failed to resolve CODER_AGENT_TOKEN",
+							slog.F("replicaset", replicaSet.Name),
+							slog.F("namespace", replicaSet.Namespace),
+							slog.Error(err))
+						continue
+					}
+					if token == "" {
+						continue
+					}
+
+					registered = true
+					p.tc.setReplicaSetToken(replicaSet.Name, token)
+
+					p.sendLog(replicaSet.Name, token, agentsdk.Log{
 						CreatedAt: time.Now(),
 						Output:    fmt.Sprintf("🐳 %s: %s", newColor(color.Bold).Sprint("Queued pod from ReplicaSet"), replicaSet.Name),
 						Level:     codersdk.LogLevelInfo,
