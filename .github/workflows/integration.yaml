@@ -35,7 +35,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
         with:
-          go-version: "~1.22"
+          go-version: "~1.24"
 
       - name: Create KinD cluster
         uses: helm/kind-action@92086f6be054225fa813e0a4b13787fc9088faab # v1.13.0
