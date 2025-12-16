@@ -221,6 +221,228 @@ func TestPodEvents(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestPodEventsWithSecretRef(t *testing.T) {
+	t.Parallel()
+
+	api := newFakeAgentAPI(t)
+
+	ctx := testutil.Context(t, testutil.WaitShort)
+	agentURL, err := url.Parse(api.server.URL)
+	require.NoError(t, err)
+	namespace := "test-namespace"
+
+	// Create the secret first
+	secret := &corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "agent-token-secret",
+			Namespace: namespace,
+		},
+		Data: map[string][]byte{
+			"token": []byte("secret-token-value"),
+		},
+	}
+	client := fake.NewSimpleClientset(secret)
+
+	cMock := quartz.NewMock(t)
+	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
+		client:      client,
+		coderURL:    agentURL,
+		namespaces:  []string{namespace},
+		logger:      slogtest.Make(t, nil).Leveled(slog.LevelDebug),
+		logDebounce: 5 * time.Second,
+		clock:       cMock,
+	})
+	require.NoError(t, err)
+
+	// Create pod with secretKeyRef for CODER_AGENT_TOKEN
+	pod := &corev1.Pod{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test-pod-secret",
+			Namespace: namespace,
+			CreationTimestamp: v1.Time{
+				Time: time.Now().Add(time.Hour),
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Env: []corev1.EnvVar{
+						{
+							Name: "CODER_AGENT_TOKEN",
+							ValueFrom: &corev1.EnvVarSource{
+								SecretKeyRef: &corev1.SecretKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: "agent-token-secret",
+									},
+									Key: "token",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	_, err = client.CoreV1().Pods(namespace).Create(ctx, pod, v1.CreateOptions{})
+	require.NoError(t, err)
+
+	source := testutil.RequireRecvCtx(ctx, t, api.logSource)
+	require.Equal(t, sourceUUID, source.ID)
+	require.Equal(t, "Kubernetes", source.DisplayName)
+	require.Equal(t, "/icon/k8s.png", source.Icon)
+
+	logs := testutil.RequireRecvCtx(ctx, t, api.logs)
+	require.Len(t, logs, 1)
+	require.Contains(t, logs[0].Output, "Created pod")
+
+	err = reporter.Close()
+	require.NoError(t, err)
+}
+
+func TestReplicaSetEventsWithSecretRef(t *testing.T) {
+	t.Parallel()
+
+	api := newFakeAgentAPI(t)
+
+	ctx := testutil.Context(t, testutil.WaitShort)
+	agentURL, err := url.Parse(api.server.URL)
+	require.NoError(t, err)
+	namespace := "test-namespace"
+
+	// Create the secret first
+	secret := &corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "agent-token-secret",
+			Namespace: namespace,
+		},
+		Data: map[string][]byte{
+			"token": []byte("secret-token-value"),
+		},
+	}
+	client := fake.NewSimpleClientset(secret)
+
+	cMock := quartz.NewMock(t)
+	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
+		client:      client,
+		coderURL:    agentURL,
+		namespaces:  []string{namespace},
+		logger:      slogtest.Make(t, nil).Leveled(slog.LevelDebug),
+		logDebounce: 5 * time.Second,
+		clock:       cMock,
+	})
+	require.NoError(t, err)
+
+	rs := &appsv1.ReplicaSet{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test-rs-secret",
+			Namespace: namespace,
+			CreationTimestamp: v1.Time{
+				Time: time.Now().Add(time.Hour),
+			},
+		},
+		Spec: appsv1.ReplicaSetSpec{
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: v1.ObjectMeta{
+					Name: "test-pod",
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Env: []corev1.EnvVar{
+							{
+								Name: "CODER_AGENT_TOKEN",
+								ValueFrom: &corev1.EnvVarSource{
+									SecretKeyRef: &corev1.SecretKeySelector{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: "agent-token-secret",
+										},
+										Key: "token",
+									},
+								},
+							},
+						},
+					}},
+				},
+			},
+		},
+	}
+	_, err = client.AppsV1().ReplicaSets(namespace).Create(ctx, rs, v1.CreateOptions{})
+	require.NoError(t, err)
+
+	source := testutil.RequireRecvCtx(ctx, t, api.logSource)
+	require.Equal(t, sourceUUID, source.ID)
+	require.Equal(t, "Kubernetes", source.DisplayName)
+	require.Equal(t, "/icon/k8s.png", source.Icon)
+
+	logs := testutil.RequireRecvCtx(ctx, t, api.logs)
+	require.Len(t, logs, 1)
+	require.Contains(t, logs[0].Output, "Queued pod from ReplicaSet")
+
+	err = reporter.Close()
+	require.NoError(t, err)
+}
+
+func TestPodEventsWithOptionalMissingSecret(t *testing.T) {
+	t.Parallel()
+
+	ctx := testutil.Context(t, testutil.WaitShort)
+	namespace := "test-namespace"
+
+	// No secret created - but it's marked as optional
+	client := fake.NewSimpleClientset()
+
+	cMock := quartz.NewMock(t)
+	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
+		client:      client,
+		coderURL:    &url.URL{Scheme: "http", Host: "localhost"},
+		namespaces:  []string{namespace},
+		logger:      slogtest.Make(t, nil).Leveled(slog.LevelDebug),
+		logDebounce: 5 * time.Second,
+		clock:       cMock,
+	})
+	require.NoError(t, err)
+
+	optional := true
+	pod := &corev1.Pod{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test-pod-optional",
+			Namespace: namespace,
+			CreationTimestamp: v1.Time{
+				Time: time.Now().Add(time.Hour),
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Env: []corev1.EnvVar{
+						{
+							Name: "CODER_AGENT_TOKEN",
+							ValueFrom: &corev1.EnvVarSource{
+								SecretKeyRef: &corev1.SecretKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: "missing-secret",
+									},
+									Key:      "token",
+									Optional: &optional,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	_, err = client.CoreV1().Pods(namespace).Create(ctx, pod, v1.CreateOptions{})
+	require.NoError(t, err)
+
+	// Should not register the pod since the optional secret is missing
+	// Give it a moment to process
+	time.Sleep(100 * time.Millisecond)
+	require.True(t, reporter.tc.isEmpty(), "pod should not be registered when optional secret is missing")
+
+	err = reporter.Close()
+	require.NoError(t, err)
+}
+
 func Test_newPodEventLogger_multipleNamespaces(t *testing.T) {
 	t.Parallel()
 

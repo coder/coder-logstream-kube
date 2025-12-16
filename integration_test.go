@@ -512,3 +512,209 @@ func TestIntegration_LabelSelector(t *testing.T) {
 		require.NotContains(t, log, "test-pod-no-label", "should not receive logs for unlabeled pod")
 	}
 }
+
+func TestIntegration_PodWithSecretRef(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	client := getKubeClient(t)
+	namespace := createTestNamespace(t, ctx, client)
+
+	// Create a secret containing the agent token
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "agent-token-secret",
+			Namespace: namespace,
+		},
+		Data: map[string][]byte{
+			"token": []byte("secret-token-integration"),
+		},
+	}
+	_, err := client.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	// Start fake Coder API server
+	api := newFakeAgentAPI(t)
+	defer api.server.Close()
+
+	agentURL, err := url.Parse(api.server.URL)
+	require.NoError(t, err)
+
+	// Create the pod event logger
+	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
+		client:      client,
+		coderURL:    agentURL,
+		namespaces:  []string{namespace},
+		logger:      slogtest.Make(t, nil).Leveled(slog.LevelDebug),
+		logDebounce: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	defer reporter.Close()
+
+	// Wait for informers to sync
+	time.Sleep(1 * time.Second)
+
+	// Create a pod with CODER_AGENT_TOKEN from secretKeyRef
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod-secret",
+			Namespace: namespace,
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name:    "test-container",
+					Image:   "busybox:latest",
+					Command: []string{"sleep", "3600"},
+					Env: []corev1.EnvVar{
+						{
+							Name: "CODER_AGENT_TOKEN",
+							ValueFrom: &corev1.EnvVarSource{
+								SecretKeyRef: &corev1.SecretKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: "agent-token-secret",
+									},
+									Key: "token",
+								},
+							},
+						},
+					},
+				},
+			},
+			NodeSelector: map[string]string{
+				"non-existent-label": "non-existent-value",
+			},
+		},
+	}
+
+	_, err = client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	// Wait for log source registration
+	waitForLogSource(t, ctx, api, 30*time.Second)
+
+	// Wait for the "Created pod" log
+	logs, found := waitForLogContaining(t, ctx, api, 30*time.Second, "Created pod")
+	require.True(t, found, "expected 'Created pod' log, got: %v", logs)
+
+	// Delete the pod and verify deletion event
+	err = client.CoreV1().Pods(namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{})
+	require.NoError(t, err)
+
+	// Wait for the "Deleted pod" log
+	logs, found = waitForLogContaining(t, ctx, api, 30*time.Second, "Deleted pod")
+	require.True(t, found, "expected 'Deleted pod' log, got: %v", logs)
+}
+
+func TestIntegration_ReplicaSetWithSecretRef(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	client := getKubeClient(t)
+	namespace := createTestNamespace(t, ctx, client)
+
+	// Create a secret containing the agent token
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "agent-token-secret",
+			Namespace: namespace,
+		},
+		Data: map[string][]byte{
+			"token": []byte("secret-token-rs-integration"),
+		},
+	}
+	_, err := client.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	// Start fake Coder API server
+	api := newFakeAgentAPI(t)
+	defer api.server.Close()
+
+	agentURL, err := url.Parse(api.server.URL)
+	require.NoError(t, err)
+
+	// Create the pod event logger
+	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
+		client:      client,
+		coderURL:    agentURL,
+		namespaces:  []string{namespace},
+		logger:      slogtest.Make(t, nil).Leveled(slog.LevelDebug),
+		logDebounce: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	defer reporter.Close()
+
+	// Wait for informers to sync
+	time.Sleep(1 * time.Second)
+
+	// Create a ReplicaSet with CODER_AGENT_TOKEN from secretKeyRef
+	replicas := int32(1)
+	rs := &appsv1.ReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-rs-secret",
+			Namespace: namespace,
+		},
+		Spec: appsv1.ReplicaSetSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app": "test-rs-secret",
+				},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"app": "test-rs-secret",
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:    "test-container",
+							Image:   "busybox:latest",
+							Command: []string{"sleep", "3600"},
+							Env: []corev1.EnvVar{
+								{
+									Name: "CODER_AGENT_TOKEN",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: "agent-token-secret",
+											},
+											Key: "token",
+										},
+									},
+								},
+							},
+						},
+					},
+					NodeSelector: map[string]string{
+						"non-existent-label": "non-existent-value",
+					},
+				},
+			},
+		},
+	}
+
+	_, err = client.AppsV1().ReplicaSets(namespace).Create(ctx, rs, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	// Wait for log source registration
+	waitForLogSource(t, ctx, api, 30*time.Second)
+
+	// Wait for the "Queued pod from ReplicaSet" log
+	logs, found := waitForLogContaining(t, ctx, api, 30*time.Second, "Queued pod from ReplicaSet")
+	require.True(t, found, "expected 'Queued pod from ReplicaSet' log, got: %v", logs)
+
+	// Delete the ReplicaSet
+	err = client.AppsV1().ReplicaSets(namespace).Delete(ctx, rs.Name, metav1.DeleteOptions{})
+	require.NoError(t, err)
+
+	// Wait for the "Deleted ReplicaSet" log
+	logs, found = waitForLogContaining(t, ctx, api, 30*time.Second, "Deleted ReplicaSet")
+	require.True(t, found, "expected 'Deleted ReplicaSet' log, got: %v", logs)
+}

@@ -1,3 +1,4 @@
 coder-logstream-kube
 coder-logstream-kube-*
+*.test
 build/
