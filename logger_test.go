@@ -11,14 +11,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
 	"github.com/hashicorp/yamux"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/emptypb"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
-	"nhooyr.io/websocket"
 	"storj.io/drpc/drpcmux"
 	"storj.io/drpc/drpcserver"
 
@@ -82,12 +83,12 @@ func TestReplicaSetEvents(t *testing.T) {
 	_, err = client.AppsV1().ReplicaSets(namespace).Create(ctx, rs, v1.CreateOptions{})
 	require.NoError(t, err)
 
-	source := testutil.RequireRecvCtx(ctx, t, api.logSource)
+	source := testutil.RequireReceive(ctx, t, api.logSource)
 	require.Equal(t, sourceUUID, source.ID)
 	require.Equal(t, "Kubernetes", source.DisplayName)
 	require.Equal(t, "/icon/k8s.png", source.Icon)
 
-	logs := testutil.RequireRecvCtx(ctx, t, api.logs)
+	logs := testutil.RequireReceive(ctx, t, api.logs)
 	require.Len(t, logs, 1)
 	require.Contains(t, logs[0].Output, "Queued pod from ReplicaSet")
 
@@ -108,14 +109,14 @@ func TestReplicaSetEvents(t *testing.T) {
 	_, err = client.CoreV1().Events(namespace).Create(ctx, event, v1.CreateOptions{})
 	require.NoError(t, err)
 
-	logs = testutil.RequireRecvCtx(ctx, t, api.logs)
+	logs = testutil.RequireReceive(ctx, t, api.logs)
 	require.Len(t, logs, 1)
 	require.Contains(t, logs[0].Output, event.Message)
 
 	err = client.AppsV1().ReplicaSets(namespace).Delete(ctx, rs.Name, v1.DeleteOptions{})
 	require.NoError(t, err)
 
-	logs = testutil.RequireRecvCtx(ctx, t, api.logs)
+	logs = testutil.RequireReceive(ctx, t, api.logs)
 	require.Len(t, logs, 1)
 	require.Contains(t, logs[0].Output, "Deleted ReplicaSet")
 
@@ -123,7 +124,7 @@ func TestReplicaSetEvents(t *testing.T) {
 		return reporter.tc.isEmpty()
 	}, time.Second, time.Millisecond)
 
-	_ = testutil.RequireRecvCtx(ctx, t, api.disconnect)
+	_ = testutil.RequireReceive(ctx, t, api.disconnect)
 
 	err = reporter.Close()
 	require.NoError(t, err)
@@ -174,12 +175,12 @@ func TestPodEvents(t *testing.T) {
 	_, err = client.CoreV1().Pods(namespace).Create(ctx, pod, v1.CreateOptions{})
 	require.NoError(t, err)
 
-	source := testutil.RequireRecvCtx(ctx, t, api.logSource)
+	source := testutil.RequireReceive(ctx, t, api.logSource)
 	require.Equal(t, sourceUUID, source.ID)
 	require.Equal(t, "Kubernetes", source.DisplayName)
 	require.Equal(t, "/icon/k8s.png", source.Icon)
 
-	logs := testutil.RequireRecvCtx(ctx, t, api.logs)
+	logs := testutil.RequireReceive(ctx, t, api.logs)
 	require.Len(t, logs, 1)
 	require.Contains(t, logs[0].Output, "Created pod")
 
@@ -200,14 +201,14 @@ func TestPodEvents(t *testing.T) {
 	_, err = client.CoreV1().Events(namespace).Create(ctx, event, v1.CreateOptions{})
 	require.NoError(t, err)
 
-	logs = testutil.RequireRecvCtx(ctx, t, api.logs)
+	logs = testutil.RequireReceive(ctx, t, api.logs)
 	require.Len(t, logs, 1)
 	require.Contains(t, logs[0].Output, event.Message)
 
 	err = client.CoreV1().Pods(namespace).Delete(ctx, pod.Name, v1.DeleteOptions{})
 	require.NoError(t, err)
 
-	logs = testutil.RequireRecvCtx(ctx, t, api.logs)
+	logs = testutil.RequireReceive(ctx, t, api.logs)
 	require.Len(t, logs, 1)
 	require.Contains(t, logs[0].Output, "Deleted pod")
 
@@ -215,7 +216,7 @@ func TestPodEvents(t *testing.T) {
 		return reporter.tc.isEmpty()
 	}, time.Second, time.Millisecond)
 
-	_ = testutil.RequireRecvCtx(ctx, t, api.disconnect)
+	_ = testutil.RequireReceive(ctx, t, api.disconnect)
 
 	err = reporter.Close()
 	require.NoError(t, err)
@@ -286,12 +287,12 @@ func TestPodEventsWithSecretRef(t *testing.T) {
 	_, err = client.CoreV1().Pods(namespace).Create(ctx, pod, v1.CreateOptions{})
 	require.NoError(t, err)
 
-	source := testutil.RequireRecvCtx(ctx, t, api.logSource)
+	source := testutil.RequireReceive(ctx, t, api.logSource)
 	require.Equal(t, sourceUUID, source.ID)
 	require.Equal(t, "Kubernetes", source.DisplayName)
 	require.Equal(t, "/icon/k8s.png", source.Icon)
 
-	logs := testutil.RequireRecvCtx(ctx, t, api.logs)
+	logs := testutil.RequireReceive(ctx, t, api.logs)
 	require.Len(t, logs, 1)
 	require.Contains(t, logs[0].Output, "Created pod")
 
@@ -368,12 +369,12 @@ func TestReplicaSetEventsWithSecretRef(t *testing.T) {
 	_, err = client.AppsV1().ReplicaSets(namespace).Create(ctx, rs, v1.CreateOptions{})
 	require.NoError(t, err)
 
-	source := testutil.RequireRecvCtx(ctx, t, api.logSource)
+	source := testutil.RequireReceive(ctx, t, api.logSource)
 	require.Equal(t, sourceUUID, source.ID)
 	require.Equal(t, "Kubernetes", source.DisplayName)
 	require.Equal(t, "/icon/k8s.png", source.Icon)
 
-	logs := testutil.RequireRecvCtx(ctx, t, api.logs)
+	logs := testutil.RequireReceive(ctx, t, api.logs)
 	require.Len(t, logs, 1)
 	require.Contains(t, logs[0].Output, "Queued pod from ReplicaSet")
 
@@ -516,22 +517,22 @@ func Test_newPodEventLogger_multipleNamespaces(t *testing.T) {
 	require.NoError(t, err)
 
 	// Wait for both pods to be registered
-	source1 := testutil.RequireRecvCtx(ctx, t, api.logSource)
+	source1 := testutil.RequireReceive(ctx, t, api.logSource)
 	require.Equal(t, sourceUUID, source1.ID)
 	require.Equal(t, "Kubernetes", source1.DisplayName)
 	require.Equal(t, "/icon/k8s.png", source1.Icon)
 
-	source2 := testutil.RequireRecvCtx(ctx, t, api.logSource)
+	source2 := testutil.RequireReceive(ctx, t, api.logSource)
 	require.Equal(t, sourceUUID, source2.ID)
 	require.Equal(t, "Kubernetes", source2.DisplayName)
 	require.Equal(t, "/icon/k8s.png", source2.Icon)
 
 	// Wait for both creation logs
-	logs1 := testutil.RequireRecvCtx(ctx, t, api.logs)
+	logs1 := testutil.RequireReceive(ctx, t, api.logs)
 	require.Len(t, logs1, 1)
 	require.Contains(t, logs1[0].Output, "Created pod")
 
-	logs2 := testutil.RequireRecvCtx(ctx, t, api.logs)
+	logs2 := testutil.RequireReceive(ctx, t, api.logs)
 	require.Len(t, logs2, 1)
 	require.Contains(t, logs2[0].Output, "Created pod")
 
@@ -556,7 +557,7 @@ func Test_newPodEventLogger_multipleNamespaces(t *testing.T) {
 	require.NoError(t, err)
 
 	// Wait for the event log
-	eventLogs := testutil.RequireRecvCtx(ctx, t, api.logs)
+	eventLogs := testutil.RequireReceive(ctx, t, api.logs)
 	require.Len(t, eventLogs, 1)
 	require.Contains(t, eventLogs[0].Output, "Test event for namespace1")
 
@@ -581,7 +582,7 @@ func Test_newPodEventLogger_multipleNamespaces(t *testing.T) {
 	require.NoError(t, err)
 
 	// Wait for the event log
-	eventLogs2 := testutil.RequireRecvCtx(ctx, t, api.logs)
+	eventLogs2 := testutil.RequireReceive(ctx, t, api.logs)
 	require.Len(t, eventLogs2, 1)
 	require.Contains(t, eventLogs2[0].Output, "Test event for namespace2")
 
@@ -685,8 +686,8 @@ func Test_logQueuer(t *testing.T) {
 		}
 
 		// it should send both a log source request and the log
-		_ = testutil.RequireRecvCtx(ctx, t, api.logSource)
-		logs := testutil.RequireRecvCtx(ctx, t, api.logs)
+		_ = testutil.RequireReceive(ctx, t, api.logSource)
+		logs := testutil.RequireReceive(ctx, t, api.logs)
 		require.Len(t, logs, 1)
 
 		ch <- agentLog{
@@ -701,12 +702,12 @@ func Test_logQueuer(t *testing.T) {
 		}
 
 		// duplicate logs should not trigger a log source
-		logs = testutil.RequireRecvCtx(ctx, t, api.logs)
+		logs = testutil.RequireReceive(ctx, t, api.logs)
 		require.Len(t, logs, 1)
 
 		clock.Advance(ttl)
 		// wait for the client to disconnect
-		_ = testutil.RequireRecvCtx(ctx, t, api.disconnect)
+		_ = testutil.RequireReceive(ctx, t, api.disconnect)
 	})
 
 	t.Run("RetryMechanism", func(t *testing.T) {
@@ -1151,8 +1152,8 @@ func Test_logCache(t *testing.T) {
 		ch <- realLog
 
 		// Should create logger and send log
-		_ = testutil.RequireRecvCtx(ctx, t, api.logSource)
-		logs := testutil.RequireRecvCtx(ctx, t, api.logs)
+		_ = testutil.RequireReceive(ctx, t, api.logSource)
+		logs := testutil.RequireReceive(ctx, t, api.logs)
 		require.Len(t, logs, 1)
 		require.Contains(t, logs[0].Output, "Real log")
 
@@ -1287,6 +1288,33 @@ func (*fakeAgentAPI) BatchUpdateMetadata(_ context.Context, _ *proto.BatchUpdate
 }
 
 func (*fakeAgentAPI) GetAnnouncementBanners(_ context.Context, _ *proto.GetAnnouncementBannersRequest) (*proto.GetAnnouncementBannersResponse, error) {
+	panic("not implemented")
+}
+
+func (*fakeAgentAPI) ScriptCompleted(_ context.Context, _ *proto.WorkspaceAgentScriptCompletedRequest) (*proto.WorkspaceAgentScriptCompletedResponse, error) {
+	panic("not implemented")
+}
+
+func (*fakeAgentAPI) GetResourcesMonitoringConfiguration(_ context.Context, _ *proto.GetResourcesMonitoringConfigurationRequest) (*proto.GetResourcesMonitoringConfigurationResponse, error) {
+	panic("not implemented")
+}
+
+func (*fakeAgentAPI) PushResourcesMonitoringUsage(_ context.Context, _ *proto.PushResourcesMonitoringUsageRequest) (*proto.PushResourcesMonitoringUsageResponse, error) {
+	panic("not implemented")
+}
+
+func (*fakeAgentAPI) CreateSubAgent(_ context.Context, _ *proto.CreateSubAgentRequest) (*proto.CreateSubAgentResponse, error) {
+	panic("not implemented")
+}
+
+func (*fakeAgentAPI) DeleteSubAgent(_ context.Context, _ *proto.DeleteSubAgentRequest) (*proto.DeleteSubAgentResponse, error) {
+	panic("not implemented")
+}
+
+func (*fakeAgentAPI) ListSubAgents(_ context.Context, _ *proto.ListSubAgentsRequest) (*proto.ListSubAgentsResponse, error) {
+	panic("not implemented")
+}
+func (*fakeAgentAPI) ReportConnection(_ context.Context, _ *proto.ReportConnectionRequest) (*emptypb.Empty, error) {
 	panic("not implemented")
 }
 

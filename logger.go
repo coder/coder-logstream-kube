@@ -505,8 +505,7 @@ func (l *logQueuer) work(ctx context.Context) {
 }
 
 func (l *logQueuer) newLogger(ctx context.Context, log agentLog) (agentLoggerLifecycle, error) {
-	client := agentsdk.New(l.coderURL)
-	client.SetSessionToken(log.agentToken)
+	client := agentsdk.New(l.coderURL, agentsdk.WithFixedToken(log.agentToken))
 	logger := l.logger.With(slog.F("resource_name", log.resourceName))
 	client.SDK.SetLogger(logger)
 
