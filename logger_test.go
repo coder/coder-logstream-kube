@@ -1228,7 +1228,13 @@ func newFakeAgentAPI(t *testing.T) *fakeAgentAPI {
 					Message: "Failed to accept websocket.",
 					Detail:  err.Error(),
 				})
+				return
 			}
+			// Ensure session is closed when context is done to unblock Serve
+			go func() {
+				<-ctx.Done()
+				_ = session.Close()
+			}()
 
 			err = dserver.Serve(ctx, session)
 			logger.Info(ctx, "drpc serveone", slog.Error(err))
