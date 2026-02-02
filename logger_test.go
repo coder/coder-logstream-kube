@@ -466,6 +466,9 @@ func Test_newPodEventLogger_multipleNamespaces(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	// Wait for informer caches to sync before creating pods
+	require.True(t, reporter.WaitForCacheSync(ctx), "informer caches failed to sync")
+
 	// Create a pod in the test-namespace1 namespace
 	pod1 := &corev1.Pod{
 		ObjectMeta: v1.ObjectMeta{
