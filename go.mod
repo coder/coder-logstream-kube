@@ -10,16 +10,17 @@ require (
 	github.com/breml/rootcerts v0.3.1
 	github.com/coder/coder/v2 v2.10.1-0.20240703121105-f6639b788f7b
 	github.com/coder/quartz v0.2.1
+	github.com/coder/websocket v1.8.14
 	github.com/fatih/color v1.18.0
 	github.com/go-chi/chi/v5 v5.2.2
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/yamux v0.1.2
 	github.com/spf13/cobra v1.10.1
 	github.com/stretchr/testify v1.10.0
+	google.golang.org/protobuf v1.36.5
 	k8s.io/api v0.33.2
 	k8s.io/apimachinery v0.33.2
 	k8s.io/client-go v0.33.2
-	nhooyr.io/websocket v1.8.11
 	storj.io/drpc v0.0.34
 )
 
@@ -200,7 +201,6 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20240513163218-0867130af1f8 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240521202816-d264139d666e // indirect
 	google.golang.org/grpc v1.64.0 // indirect
-	google.golang.org/protobuf v1.36.5 // indirect
 	gopkg.in/DataDog/dd-trace-go.v1 v1.64.0 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
@@ -210,6 +210,7 @@ require (
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20250318190949-c8a335a9a2ff // indirect
 	k8s.io/utils v0.0.0-20241104100929-3ea5e8cea738 // indirect
+	nhooyr.io/websocket v1.8.11 // indirect
 	sigs.k8s.io/json v0.0.0-20241010143419-9aa6b5e7a4b3 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.6.0 // indirect

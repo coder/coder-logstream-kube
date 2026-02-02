@@ -132,6 +132,8 @@ github.com/coder/tailscale v1.1.1-0.20240702054557-aa558fbe5374 h1:a5Eg7D5e2oAc0
 github.com/coder/tailscale v1.1.1-0.20240702054557-aa558fbe5374/go.mod h1:rp6BIJxCp127/hvvDWNkHC9MxAlKvQfoOtBr8s5sCqo=
 github.com/coder/terraform-provider-coder v0.23.0 h1:DuNLWxhnGlXyG0g+OCAZRI6xd8+bJjIEnE4F3hYgA4E=
 github.com/coder/terraform-provider-coder v0.23.0/go.mod h1:wMun9UZ9HT2CzF6qPPBup1odzBpVUc0/xSFoXgdI3tk=
+github.com/coder/websocket v1.8.14 h1:9L0p0iKiNOibykf283eHkKUHHrpG7f65OE3BhhO7v9g=
+github.com/coder/websocket v1.8.14/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
 github.com/coreos/go-iptables v0.6.0 h1:is9qnZMPYjLd8LYqmm/qlE+wwEgJIkTYdhV3rfZo4jk=
 github.com/coreos/go-iptables v0.6.0/go.mod h1:Qe8Bv2Xik5FyTXwgIbLAnv2sWSBmvWdFETJConOQ//Q=
 github.com/coreos/go-oidc/v3 v3.10.0 h1:tDnXHnLyiTVyT/2zLDGj09pFPkhND8Gl8lnTRhoEaJU=
