@@ -116,6 +116,9 @@ type podEventLogger struct {
 
 	logCh chan<- agentLog
 	lq    *logQueuer
+
+	// hasSyncedFuncs tracks informer cache sync functions for testing
+	hasSyncedFuncs []cache.InformerSynced
 }
 
 // resolveEnvValue resolves the value of an environment variable, supporting both
@@ -368,7 +371,21 @@ func (p *podEventLogger) initNamespace(namespace string) error {
 	if podFactory != eventFactory {
 		eventFactory.Start(p.stopChan)
 	}
+
+	// Track HasSynced functions for WaitForCacheSync
+	p.hasSyncedFuncs = append(p.hasSyncedFuncs,
+		podInformer.HasSynced,
+		replicaInformer.HasSynced,
+		eventInformer.HasSynced,
+	)
+
 	return nil
+}
+
+// WaitForCacheSync waits for all informer caches to sync.
+// This is useful for testing to ensure informers are ready before creating resources.
+func (p *podEventLogger) WaitForCacheSync(ctx context.Context) bool {
+	return cache.WaitForCacheSync(ctx.Done(), p.hasSyncedFuncs...)
 }
 
 var sourceUUID = uuid.MustParse("cabdacf8-7c90-425c-9815-cae3c75d1169")
