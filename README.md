@@ -24,6 +24,20 @@ helm install coder-logstream-kube coder-logstream-kube/coder-logstream-kube \
     --set url=<your-coder-url-including-http-or-https>
 ```
 
+> **Multi-Namespace support**
+>
+> By default, coder-logstream-kube will watch all namespaces in the cluster. To limit which namespaces are monitored, you can specify them in the [values.yaml](helm/values.yaml) file:
+>
+> ```yaml
+> # Watch specific namespaces only
+> namespaces: ["default", "kube-system"]
+> 
+> # Watch all namespaces (default)
+> namespaces: []
+> ```
+>
+> When `namespaces` is empty or not specified, the service will monitor all namespaces in the cluster.
+
 > **Note**
 > For additional customization (such as customizing the image, pull secrets, annotations, etc.), you can use the
 > [values.yaml](helm/values.yaml) file directly.
@@ -50,3 +64,42 @@ Kubernetes provides an [informers](https://pkg.go.dev/k8s.io/client-go/informers
 
 - [`SSL_CERT_FILE`](https://go.dev/src/crypto/x509/root_unix.go#L19): Specifies the path to an SSL certificate.
 - [`SSL_CERT_DIR`](https://go.dev/src/crypto/x509/root_unix.go#L25): Identifies which directory to check for SSL certificate files.
+
+## Development
+
+### Running Tests
+
+Unit tests can be run with:
+
+```console
+go test ./... -race
+```
+
+### Integration Tests
+
+Integration tests run against a real Kubernetes cluster using [KinD (Kubernetes in Docker)](https://kind.sigs.k8s.io/).
+
+**Prerequisites:**
+- [Docker](https://docs.docker.com/get-docker/)
+- [KinD](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
+- [kubectl](https://kubernetes.io/docs/tasks/tools/)
+
+**Setup and run:**
+
+```console
+# Create a KinD cluster
+./scripts/kind-setup.sh create
+
+# Run integration tests
+go test -tags=integration -v ./...
+
+# Clean up when done
+./scripts/kind-setup.sh delete
+```
+
+The integration tests validate:
+- Pod event streaming with real Kubernetes informers
+- ReplicaSet event handling
+- Multi-namespace support
+- Label selector filtering
+

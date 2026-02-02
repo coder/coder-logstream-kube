@@ -1,14 +1,62 @@
+{{- define "coder-logstream-kube.rules" -}}
+- apiGroups: [""]
+  resources: ["pods", "events"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get"]
+- apiGroups: ["apps"]
+  resources: ["replicasets", "events"]
+  verbs: ["get", "watch", "list"]
+{{- end -}}
+
+{{- if .Values.namespaces }}
+{{- range .Values.namespaces }}
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: coder-logstream-kube-role
+  namespace: {{ . }}
 rules:
-- apiGroups: [""]
-  resources: ["pods", "events"]
-  verbs: ["get", "watch", "list"]
-- apiGroups: ["apps"]
-  resources: ["replicasets", "events"]
-  verbs: ["get", "watch", "list"]
+{{ include "coder-logstream-kube.rules" . | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: coder-logstream-kube-rolebinding
+  namespace: {{ . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: coder-logstream-kube-role
+subjects:
+- kind: ServiceAccount
+  name: {{ $.Values.serviceAccount.name | quote }}
+  namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- else }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: coder-logstream-kube-role
+rules:
+{{ include "coder-logstream-kube.rules" . | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: coder-logstream-kube-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: coder-logstream-kube-role
+subjects:
+- kind: ServiceAccount
+  name: {{ .Values.serviceAccount.name | quote }}
+  namespace: {{ .Release.Namespace }}
+{{- end }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -16,18 +64,6 @@ metadata:
   name: {{ .Values.serviceAccount.name | quote }}
   annotations: {{ toYaml .Values.serviceAccount.annotations | nindent 4 }}
   labels: {{ toYaml .Values.serviceAccount.labels | nindent 4 }}
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: coder-logstream-kube-rolebinding
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: coder-logstream-kube-role
-subjects:
-- kind: ServiceAccount
-  name: {{ .Values.serviceAccount.name | quote }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -65,6 +101,10 @@ spec:
       nodeSelector:
       {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.podSecurityContext }}
+      podSecurityContext:
+      {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: coder-logstream-kube
           image: "{{ .Values.image.repo }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
@@ -75,8 +115,10 @@ spec:
           env:
             - name: CODER_URL
               value: {{ .Values.url }}
-            - name: CODER_NAMESPACE
-              value: {{  .Values.namespace | default .Release.Namespace }}
+            {{- if .Values.namespaces }}
+            - name: CODER_NAMESPACES
+              value: {{ join "," .Values.namespaces }}
+            {{- end }}
             {{- if .Values.image.sslCertFile }}
             - name: SSL_CERT_FILE
               value: {{ .Values.image.sslCertFile }}

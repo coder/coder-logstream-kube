@@ -15,7 +15,7 @@
 # to the Coder OSS repo. This requires `gsutil` to be installed and configured.
 
 set -euo pipefail
-cd $(dirname $(dirname "${BASH_SOURCE[0]}"))
+cd "$(dirname "$(dirname "${BASH_SOURCE[0]}")")"
 
 log() {
 	echo "$*" 1>&2

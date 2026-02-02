@@ -1,3 +1,5 @@
+// Package main implements coder-logstream-kube, a Kubernetes controller
+// that streams pod logs to the Coder agent API.
 package main
 
 import (
@@ -11,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -34,9 +37,11 @@ type podEventLoggerOptions struct {
 
 	logger      slog.Logger
 	logDebounce time.Duration
+	// maxRetries is the maximum number of retries for a log send failure.
+	maxRetries int
 
 	// The following fields are optional!
-	namespace     string
+	namespaces    []string
 	fieldSelector string
 	labelSelector string
 }
@@ -50,6 +55,10 @@ func newPodEventLogger(ctx context.Context, opts podEventLoggerOptions) (*podEve
 	}
 	if opts.clock == nil {
 		opts.clock = quartz.NewReal()
+	}
+
+	if opts.maxRetries == 0 {
+		opts.maxRetries = 10
 	}
 
 	logCh := make(chan agentLog, 512)
@@ -75,10 +84,24 @@ func newPodEventLogger(ctx context.Context, opts podEventLoggerOptions) (*podEve
 			logCache: logCache{
 				logs: map[string][]agentsdk.Log{},
 			},
+			maxRetries: opts.maxRetries,
 		},
 	}
 
-	return reporter, reporter.init()
+	// If no namespaces are provided, we listen for events in all namespaces.
+	if len(opts.namespaces) == 0 {
+		if err := reporter.initNamespace(""); err != nil {
+			return nil, fmt.Errorf("init namespace: %w", err)
+		}
+	} else {
+		for _, namespace := range opts.namespaces {
+			if err := reporter.initNamespace(namespace); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return reporter, nil
 }
 
 type podEventLogger struct {
@@ -95,22 +118,56 @@ type podEventLogger struct {
 	lq    *logQueuer
 }
 
-// init starts the informer factory and registers event handlers.
-func (p *podEventLogger) init() error {
+// resolveEnvValue resolves the value of an environment variable, supporting both
+// direct values and secretKeyRef references. Returns empty string if the value
+// cannot be resolved (e.g., optional secret not found).
+func (p *podEventLogger) resolveEnvValue(ctx context.Context, namespace string, env corev1.EnvVar) (string, error) {
+	// Direct value takes precedence (existing behavior)
+	if env.Value != "" {
+		return env.Value, nil
+	}
+
+	// Check for secretKeyRef
+	if env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
+		ref := env.ValueFrom.SecretKeyRef
+		secret, err := p.client.CoreV1().Secrets(namespace).Get(ctx, ref.Name, v1.GetOptions{})
+		if err != nil {
+			// Handle optional secrets gracefully - only ignore NotFound errors
+			if ref.Optional != nil && *ref.Optional && k8serrors.IsNotFound(err) {
+				return "", nil
+			}
+			return "", fmt.Errorf("get secret %s: %w", ref.Name, err)
+		}
+		value, ok := secret.Data[ref.Key]
+		if !ok {
+			if ref.Optional != nil && *ref.Optional {
+				return "", nil
+			}
+			return "", fmt.Errorf("secret %s has no key %s", ref.Name, ref.Key)
+		}
+		return string(value), nil
+	}
+
+	return "", nil
+}
+
+// initNamespace starts the informer factory and registers event handlers for a given namespace.
+// If provided namespace is empty, it will start the informer factory and register event handlers for all namespaces.
+func (p *podEventLogger) initNamespace(namespace string) error {
 	// We only track events that happen after the reporter starts.
 	// This is to prevent us from sending duplicate events.
 	startTime := time.Now()
 
 	go p.lq.work(p.ctx)
 
-	podFactory := informers.NewSharedInformerFactoryWithOptions(p.client, 0, informers.WithNamespace(p.namespace), informers.WithTweakListOptions(func(lo *v1.ListOptions) {
+	podFactory := informers.NewSharedInformerFactoryWithOptions(p.client, 0, informers.WithNamespace(namespace), informers.WithTweakListOptions(func(lo *v1.ListOptions) {
 		lo.FieldSelector = p.fieldSelector
 		lo.LabelSelector = p.labelSelector
 	}))
 	eventFactory := podFactory
 	if p.fieldSelector != "" || p.labelSelector != "" {
 		// Events cannot filter on labels and fields!
-		eventFactory = informers.NewSharedInformerFactoryWithOptions(p.client, 0, informers.WithNamespace(p.namespace))
+		eventFactory = informers.NewSharedInformerFactoryWithOptions(p.client, 0, informers.WithNamespace(namespace))
 	}
 
 	// We listen for Pods and Events in the informer factory.
@@ -134,15 +191,28 @@ func (p *podEventLogger) init() error {
 					if env.Name != "CODER_AGENT_TOKEN" {
 						continue
 					}
+
+					token, err := p.resolveEnvValue(p.ctx, pod.Namespace, env)
+					if err != nil {
+						p.logger.Warn(p.ctx, "failed to resolve CODER_AGENT_TOKEN",
+							slog.F("pod", pod.Name),
+							slog.F("namespace", pod.Namespace),
+							slog.Error(err))
+						continue
+					}
+					if token == "" {
+						continue
+					}
+
 					registered = true
-					p.tc.setPodToken(pod.Name, env.Value)
+					p.tc.setPodToken(pod.Name, token)
 
 					// We don't want to add logs to workspaces that are already started!
 					if !pod.CreationTimestamp.After(startTime) {
 						continue
 					}
 
-					p.sendLog(pod.Name, env.Value, agentsdk.Log{
+					p.sendLog(pod.Name, token, agentsdk.Log{
 						CreatedAt: time.Now(),
 						Output:    fmt.Sprintf("🐳 %s: %s", newColor(color.Bold).Sprint("Created pod"), pod.Name),
 						Level:     codersdk.LogLevelInfo,
@@ -195,10 +265,23 @@ func (p *podEventLogger) init() error {
 					if env.Name != "CODER_AGENT_TOKEN" {
 						continue
 					}
-					registered = true
-					p.tc.setReplicaSetToken(replicaSet.Name, env.Value)
 
-					p.sendLog(replicaSet.Name, env.Value, agentsdk.Log{
+					token, err := p.resolveEnvValue(p.ctx, replicaSet.Namespace, env)
+					if err != nil {
+						p.logger.Warn(p.ctx, "failed to resolve CODER_AGENT_TOKEN",
+							slog.F("replicaset", replicaSet.Name),
+							slog.F("namespace", replicaSet.Namespace),
+							slog.Error(err))
+						continue
+					}
+					if token == "" {
+						continue
+					}
+
+					registered = true
+					p.tc.setReplicaSetToken(replicaSet.Name, token)
+
+					p.sendLog(replicaSet.Name, token, agentsdk.Log{
 						CreatedAt: time.Now(),
 						Output:    fmt.Sprintf("🐳 %s: %s", newColor(color.Bold).Sprint("Queued pod from ReplicaSet"), replicaSet.Name),
 						Level:     codersdk.LogLevelInfo,
@@ -277,7 +360,7 @@ func (p *podEventLogger) init() error {
 
 	p.logger.Info(p.ctx, "listening for pod events",
 		slog.F("coder_url", p.coderURL.String()),
-		slog.F("namespace", p.namespace),
+		slog.F("namespace", namespace),
 		slog.F("field_selector", p.fieldSelector),
 		slog.F("label_selector", p.labelSelector),
 	)
@@ -310,6 +393,7 @@ func (p *podEventLogger) sendDelete(token string) {
 	}
 }
 
+// Close stops the pod event logger and releases all resources.
 func (p *podEventLogger) Close() error {
 	p.cancelFunc()
 	close(p.stopChan)
@@ -395,6 +479,11 @@ type logQueuer struct {
 	loggerTTL time.Duration
 	loggers   map[string]agentLoggerLifecycle
 	logCache  logCache
+
+	// retries maps agent tokens to their retry state for exponential backoff
+	retries map[string]*retryState
+	// maxRetries is the maximum number of retries for a log send failure.
+	maxRetries int
 }
 
 func (l *logQueuer) work(ctx context.Context) {
@@ -415,87 +504,118 @@ func (l *logQueuer) work(ctx context.Context) {
 	}
 }
 
+func (l *logQueuer) newLogger(ctx context.Context, log agentLog) (agentLoggerLifecycle, error) {
+	client := agentsdk.New(l.coderURL, agentsdk.WithFixedToken(log.agentToken))
+	logger := l.logger.With(slog.F("resource_name", log.resourceName))
+	client.SDK.SetLogger(logger)
+
+	_, err := client.PostLogSource(ctx, agentsdk.PostLogSourceRequest{
+		ID:          sourceUUID,
+		Icon:        "/icon/k8s.png",
+		DisplayName: "Kubernetes",
+	})
+	if err != nil {
+		// Posting the log source failed, which affects how logs appear.
+		// We'll retry to ensure the log source is properly registered.
+		logger.Error(ctx, "post log source", slog.Error(err))
+		return agentLoggerLifecycle{}, err
+	}
+
+	ls := agentsdk.NewLogSender(logger)
+	sl := ls.GetScriptLogger(sourceUUID)
+
+	gracefulCtx, gracefulCancel := context.WithCancel(context.Background())
+
+	// connect to Agent v2.0 API, since we don't need features added later.
+	// This maximizes compatibility.
+	arpc, err := client.ConnectRPC20(gracefulCtx)
+	if err != nil {
+		logger.Error(ctx, "drpc connect", slog.Error(err))
+		gracefulCancel()
+		return agentLoggerLifecycle{}, err
+	}
+	go func() {
+		err := ls.SendLoop(gracefulCtx, arpc)
+		// if the send loop exits on its own without the context
+		// canceling, timeout the logger and force it to recreate.
+		if err != nil && ctx.Err() == nil {
+			l.loggerTimeout(log.agentToken)
+		}
+	}()
+
+	closeTimer := l.clock.AfterFunc(l.loggerTTL, func() {
+		logger.Info(ctx, "logger timeout firing")
+		l.loggerTimeout(log.agentToken)
+	})
+	lifecycle := agentLoggerLifecycle{
+		scriptLogger: sl,
+		close: func() {
+			defer func() {
+				_ = arpc.DRPCConn().Close()
+			}()
+			defer client.SDK.HTTPClient.CloseIdleConnections()
+			// We could be stopping for reasons other than the timeout. If
+			// so, stop the timer.
+			closeTimer.Stop()
+			defer gracefulCancel()
+			timeout := l.clock.AfterFunc(5*time.Second, gracefulCancel)
+			defer timeout.Stop()
+			logger.Info(ctx, "logger closing")
+
+			if err := sl.Flush(gracefulCtx); err != nil {
+				// ctx err
+				logger.Warn(gracefulCtx, "timeout reached while flushing")
+				return
+			}
+
+			if err := ls.WaitUntilEmpty(gracefulCtx); err != nil {
+				// ctx err
+				logger.Warn(gracefulCtx, "timeout reached while waiting for log queue to empty")
+			}
+		},
+	}
+	lifecycle.closeTimer = closeTimer
+	return lifecycle, nil
+}
+
 func (l *logQueuer) processLog(ctx context.Context, log agentLog) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	queuedLogs := l.logCache.push(log)
-	lgr, ok := l.loggers[log.agentToken]
-	if !ok {
-		client := agentsdk.New(l.coderURL)
-		client.SetSessionToken(log.agentToken)
-		logger := l.logger.With(slog.F("resource_name", log.resourceName))
-		client.SDK.SetLogger(logger)
 
-		_, err := client.PostLogSource(ctx, agentsdk.PostLogSourceRequest{
-			ID:          sourceUUID,
-			Icon:        "/icon/k8s.png",
-			DisplayName: "Kubernetes",
-		})
-		if err != nil {
-			// This shouldn't fail sending the log, as it only affects how they
-			// appear.
-			logger.Error(ctx, "post log source", slog.Error(err))
-		}
-
-		ls := agentsdk.NewLogSender(logger)
-		sl := ls.GetScriptLogger(sourceUUID)
-
-		gracefulCtx, gracefulCancel := context.WithCancel(context.Background())
-
-		// connect to Agent v2.0 API, since we don't need features added later.
-		// This maximizes compatibility.
-		arpc, err := client.ConnectRPC20(gracefulCtx)
-		if err != nil {
-			logger.Error(ctx, "drpc connect", slog.Error(err))
-			gracefulCancel()
+	queuedLogs := l.logCache.get(log.agentToken)
+	if isAgentLogEmpty(log) {
+		if queuedLogs == nil {
 			return
 		}
-		go func() {
-			err := ls.SendLoop(gracefulCtx, arpc)
-			// if the send loop exits on its own without the context
-			// canceling, timeout the logger and force it to recreate.
-			if err != nil && ctx.Err() == nil {
-				l.loggerTimeout(log.agentToken)
-			}
-		}()
+	} else {
+		queuedLogs = l.logCache.push(log)
+	}
 
-		closeTimer := l.clock.AfterFunc(l.loggerTTL, func() {
-			logger.Info(ctx, "logger timeout firing")
-			l.loggerTimeout(log.agentToken)
-		})
-		lifecycle := agentLoggerLifecycle{
-			scriptLogger: sl,
-			close: func() {
-				// We could be stopping for reasons other than the timeout. If
-				// so, stop the timer.
-				closeTimer.Stop()
-				defer gracefulCancel()
-				timeout := l.clock.AfterFunc(5*time.Second, gracefulCancel)
-				defer timeout.Stop()
-				logger.Info(ctx, "logger closing")
-
-				if err := sl.Flush(gracefulCtx); err != nil {
-					// ctx err
-					logger.Warn(gracefulCtx, "timeout reached while flushing")
-					return
-				}
-
-				if err := ls.WaitUntilEmpty(gracefulCtx); err != nil {
-					// ctx err
-					logger.Warn(gracefulCtx, "timeout reached while waiting for log queue to empty")
-				}
-
-				_ = arpc.DRPCConn().Close()
-				client.SDK.HTTPClient.CloseIdleConnections()
-			},
+	lgr, ok := l.loggers[log.agentToken]
+	if !ok {
+		// skip if we're in a retry cooldown window
+		if rs := l.retries[log.agentToken]; rs != nil && rs.timer != nil {
+			return
 		}
-		lifecycle.closeTimer = closeTimer
-		l.loggers[log.agentToken] = lifecycle
-		lgr = lifecycle
+
+		var err error
+		lgr, err = l.newLogger(ctx, log)
+		if err != nil {
+			l.scheduleRetry(ctx, log.agentToken)
+			return
+		}
+		l.loggers[log.agentToken] = lgr
 	}
 
 	lgr.resetCloseTimer(l.loggerTTL)
-	_ = lgr.scriptLogger.Send(ctx, queuedLogs...)
+	if len(queuedLogs) == 0 {
+		return
+	}
+	if err := lgr.scriptLogger.Send(ctx, queuedLogs...); err != nil {
+		l.scheduleRetry(ctx, log.agentToken)
+		return
+	}
+	l.clearRetryLocked(log.agentToken)
 	l.logCache.delete(log.agentToken)
 }
 
@@ -504,8 +624,9 @@ func (l *logQueuer) processDelete(log agentLog) {
 	lgr, ok := l.loggers[log.agentToken]
 	if ok {
 		delete(l.loggers, log.agentToken)
-
 	}
+	l.clearRetryLocked(log.agentToken)
+	l.logCache.delete(log.agentToken)
 	l.mu.Unlock()
 
 	if ok {
@@ -537,6 +658,81 @@ func (l *agentLoggerLifecycle) resetCloseTimer(ttl time.Duration) {
 	}
 }
 
+// retryState tracks exponential backoff for an agent token.
+type retryState struct {
+	delay      time.Duration
+	timer      *quartz.Timer
+	retryCount int
+	exhausted  bool // prevent retry state recreation after max retries
+}
+
+func (l *logQueuer) scheduleRetry(ctx context.Context, token string) {
+	if l.retries == nil {
+		l.retries = make(map[string]*retryState)
+	}
+
+	rs := l.retries[token]
+
+	if rs != nil && rs.exhausted {
+		return
+	}
+
+	if rs == nil {
+		rs = &retryState{delay: time.Second, retryCount: 0, exhausted: false}
+		l.retries[token] = rs
+	}
+
+	rs.retryCount++
+
+	// If we've reached the max retries, clear the retry state and delete the log cache.
+	if rs.retryCount >= l.maxRetries {
+		l.logger.Error(ctx, "max retries exceeded",
+			slog.F("retryCount", rs.retryCount),
+			slog.F("maxRetries", l.maxRetries))
+		rs.exhausted = true
+		if rs.timer != nil {
+			rs.timer.Stop()
+			rs.timer = nil
+		}
+		l.logCache.delete(token)
+		return
+	}
+
+	if rs.timer != nil {
+		return
+	}
+
+	l.logger.Info(ctx, "scheduling retry",
+		slog.F("delay", rs.delay.String()),
+		slog.F("retryCount", rs.retryCount))
+
+	rs.timer = l.clock.AfterFunc(rs.delay, func() {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+
+		if cur := l.retries[token]; cur != nil && !cur.exhausted {
+			cur.timer = nil
+			l.q <- agentLog{op: opLog, agentToken: token}
+		}
+	})
+
+	rs.delay *= 2
+	if rs.delay > 30*time.Second {
+		rs.delay = 30 * time.Second
+	}
+}
+
+// clearRetryLocked clears the retry state for the given token.
+// The caller must hold the mutex lock.
+func (l *logQueuer) clearRetryLocked(token string) {
+	if rs := l.retries[token]; rs != nil {
+		if rs.timer != nil {
+			rs.timer.Stop()
+		}
+		delete(l.retries, token)
+	}
+}
+
 func newColor(value ...color.Attribute) *color.Color {
 	c := color.New(value...)
 	c.EnableColor()
@@ -559,4 +755,16 @@ func (l *logCache) push(log agentLog) []agentsdk.Log {
 
 func (l *logCache) delete(token string) {
 	delete(l.logs, token)
+}
+
+func (l *logCache) get(token string) []agentsdk.Log {
+	logs, ok := l.logs[token]
+	if !ok {
+		return nil
+	}
+	return logs
+}
+
+func isAgentLogEmpty(log agentLog) bool {
+	return log.resourceName == "" && log.log.Output == "" && log.log.CreatedAt.IsZero()
 }
