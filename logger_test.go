@@ -1236,11 +1236,12 @@ func newFakeAgentAPI(t *testing.T) *fakeAgentAPI {
 
 		rtr.ServeHTTP(w, r)
 	}))
+	t.Cleanup(fakeAPI.server.Close)
 
 	return fakeAPI
 }
 
-func newFailingAgentAPI(_ *testing.T) *fakeAgentAPI {
+func newFailingAgentAPI(t *testing.T) *fakeAgentAPI {
 	fakeAPI := &fakeAgentAPI{
 		disconnect: make(chan struct{}),
 		logs:       make(chan []*proto.Log),
@@ -1251,6 +1252,7 @@ func newFailingAgentAPI(_ *testing.T) *fakeAgentAPI {
 	fakeAPI.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 	}))
+	t.Cleanup(fakeAPI.server.Close)
 
 	return fakeAPI
 }
