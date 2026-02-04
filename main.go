@@ -42,6 +42,9 @@ func root() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("parse coder URL: %w", err)
 			}
+			if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+				return fmt.Errorf("CODER_URL must include http:// or https:// scheme, got: %q", coderURL)
+			}
 
 			if len(kubeConfig) > 0 && kubeConfig[0] == '~' {
 				home, err := os.UserHomeDir()
