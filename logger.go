@@ -119,6 +119,9 @@ type podEventLogger struct {
 
 	// hasSyncedFuncs tracks informer cache sync functions for testing
 	hasSyncedFuncs []cache.InformerSynced
+
+	// closeOnce ensures Close() is idempotent
+	closeOnce sync.Once
 }
 
 // resolveEnvValue resolves the value of an environment variable, supporting both
@@ -411,10 +414,13 @@ func (p *podEventLogger) sendDelete(token string) {
 }
 
 // Close stops the pod event logger and releases all resources.
+// Close is idempotent and safe to call multiple times.
 func (p *podEventLogger) Close() error {
-	p.cancelFunc()
-	close(p.stopChan)
-	close(p.errChan)
+	p.closeOnce.Do(func() {
+		p.cancelFunc()
+		close(p.stopChan)
+		close(p.errChan)
+	})
 	return nil
 }
 

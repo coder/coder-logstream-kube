@@ -1179,6 +1179,90 @@ func Test_logCache(t *testing.T) {
 	})
 }
 
+func TestCloseIdempotent(t *testing.T) {
+	t.Parallel()
+
+	api := newFakeAgentAPI(t)
+
+	ctx := testutil.Context(t, testutil.WaitShort)
+	agentURL, err := url.Parse(api.server.URL)
+	require.NoError(t, err)
+	namespace := "test-namespace"
+
+	client := fake.NewSimpleClientset()
+
+	cMock := quartz.NewMock(t)
+	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
+		client:      client,
+		coderURL:    agentURL,
+		namespaces:  []string{namespace},
+		logger:      slogtest.Make(t, nil).Leveled(slog.LevelDebug),
+		logDebounce: 5 * time.Second,
+		clock:       cMock,
+	})
+	require.NoError(t, err)
+
+	// First close should succeed
+	err = reporter.Close()
+	require.NoError(t, err)
+
+	// Second close should not panic (idempotent)
+	err = reporter.Close()
+	require.NoError(t, err)
+}
+
+func TestCloseDuringProcessing(t *testing.T) {
+	t.Parallel()
+
+	api := newFakeAgentAPI(t)
+
+	ctx := testutil.Context(t, testutil.WaitShort)
+	agentURL, err := url.Parse(api.server.URL)
+	require.NoError(t, err)
+	namespace := "test-namespace"
+
+	client := fake.NewSimpleClientset()
+
+	cMock := quartz.NewMock(t)
+	reporter, err := newPodEventLogger(ctx, podEventLoggerOptions{
+		client:      client,
+		coderURL:    agentURL,
+		namespaces:  []string{namespace},
+		logger:      slogtest.Make(t, nil).Leveled(slog.LevelDebug),
+		logDebounce: 5 * time.Second,
+		clock:       cMock,
+	})
+	require.NoError(t, err)
+
+	// Create a pod to trigger processing
+	pod := &corev1.Pod{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test-pod-close",
+			Namespace: namespace,
+			CreationTimestamp: v1.Time{
+				Time: time.Now().Add(time.Hour),
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Env: []corev1.EnvVar{{
+					Name:  "CODER_AGENT_TOKEN",
+					Value: "test-token",
+				}},
+			}},
+		},
+	}
+	_, err = client.CoreV1().Pods(namespace).Create(ctx, pod, v1.CreateOptions{})
+	require.NoError(t, err)
+
+	// Wait for log source to be registered
+	_ = testutil.RequireReceive(ctx, t, api.logSource)
+
+	// Close while processing is active
+	err = reporter.Close()
+	require.NoError(t, err)
+}
+
 func newFakeAgentAPI(t *testing.T) *fakeAgentAPI {
 	logger := slogtest.Make(t, nil)
 	mux := drpcmux.New()
