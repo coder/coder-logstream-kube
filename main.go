@@ -9,7 +9,7 @@ import (
 
 	"cdr.dev/slog"
 	"cdr.dev/slog/sloggers/sloghuman"
-	"github.com/spf13/cobra"
+	"github.com/coder/serpent"
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -17,13 +17,13 @@ import (
 
 func main() {
 	cmd := root()
-	err := cmd.Execute()
+	err := cmd.Invoke().WithOS().Run()
 	if err != nil {
 		os.Exit(1)
 	}
 }
 
-func root() *cobra.Command {
+func root() *serpent.Command {
 	var (
 		coderURL      string
 		fieldSelector string
@@ -31,10 +31,50 @@ func root() *cobra.Command {
 		namespacesStr string
 		labelSelector string
 	)
-	cmd := &cobra.Command{
+	cmd := &serpent.Command{
 		Use:   "coder-logstream-kube",
 		Short: "Stream Kubernetes Pod events to the Coder startup logs.",
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Options: serpent.OptionSet{
+			{
+				Name:          "coder-url",
+				Flag:          "coder-url",
+				FlagShorthand: "u",
+				Env:           "CODER_URL",
+				Value:         serpent.StringOf(&coderURL),
+				Description:   "URL of the Coder instance.",
+			},
+			{
+				Name:          "kubeconfig",
+				Flag:          "kubeconfig",
+				FlagShorthand: "k",
+				Default:       "~/.kube/config",
+				Value:         serpent.StringOf(&kubeConfig),
+				Description:   "Path to the kubeconfig file.",
+			},
+			{
+				Name:          "namespaces",
+				Flag:          "namespaces",
+				FlagShorthand: "n",
+				Env:           "CODER_NAMESPACES",
+				Value:         serpent.StringOf(&namespacesStr),
+				Description:   "List of namespaces to use when listing pods.",
+			},
+			{
+				Name:          "field-selector",
+				Flag:          "field-selector",
+				FlagShorthand: "f",
+				Value:         serpent.StringOf(&fieldSelector),
+				Description:   "Field selector to use when listing pods.",
+			},
+			{
+				Name:          "label-selector",
+				Flag:          "label-selector",
+				FlagShorthand: "l",
+				Value:         serpent.StringOf(&labelSelector),
+				Description:   "Label selector to use when listing pods.",
+			},
+		},
+		Handler: func(inv *serpent.Invocation) error {
 			if coderURL == "" {
 				return fmt.Errorf("--coder-url is required")
 			}
@@ -75,13 +115,13 @@ func root() *cobra.Command {
 				}
 			}
 
-			reporter, err := newPodEventLogger(cmd.Context(), podEventLoggerOptions{
+			reporter, err := newPodEventLogger(inv.Context(), podEventLoggerOptions{
 				coderURL:      parsedURL,
 				client:        client,
 				namespaces:    namespaces,
 				fieldSelector: fieldSelector,
 				labelSelector: labelSelector,
-				logger:        slog.Make(sloghuman.Sink(cmd.ErrOrStderr())).Leveled(slog.LevelDebug),
+				logger:        slog.Make(sloghuman.Sink(inv.Stderr)).Leveled(slog.LevelDebug),
 				maxRetries:    15, // 15 retries is the default max retries for a log send failure.
 			})
 			if err != nil {
@@ -93,16 +133,11 @@ func root() *cobra.Command {
 			select {
 			case err := <-reporter.errChan:
 				return fmt.Errorf("pod event reporter: %w", err)
-			case <-cmd.Context().Done():
+			case <-inv.Context().Done():
 			}
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&coderURL, "coder-url", "u", os.Getenv("CODER_URL"), "URL of the Coder instance")
-	cmd.Flags().StringVarP(&kubeConfig, "kubeconfig", "k", "~/.kube/config", "Path to the kubeconfig file")
-	cmd.Flags().StringVarP(&namespacesStr, "namespaces", "n", os.Getenv("CODER_NAMESPACES"), "List of namespaces to use when listing pods")
-	cmd.Flags().StringVarP(&fieldSelector, "field-selector", "f", "", "Field selector to use when listing pods")
-	cmd.Flags().StringVarP(&labelSelector, "label-selector", "l", "", "Label selector to use when listing pods")
 
 	return cmd
 }
