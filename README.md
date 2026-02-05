@@ -115,3 +115,8 @@ Kubernetes provides an [informers](https://pkg.go.dev/k8s.io/client-go/informers
 Feel free to [open an issue](https://github.com/coder/coder-logstream-kube/issues/new) if you have questions, run into bugs, or have a feature request.
 
 [Join our Discord](https://discord.gg/coder) to provide feedback and chat with the community!
+
+## License
+
+[AGPL-3.0](./LICENSE)
+
