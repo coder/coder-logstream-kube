@@ -95,11 +95,15 @@ func newPodEventLogger(ctx context.Context, opts podEventLoggerOptions) (*podEve
 	// If no namespaces are provided, we listen for events in all namespaces.
 	if len(opts.namespaces) == 0 {
 		if err := reporter.initNamespace(""); err != nil {
+			reporter.cancelFunc()
+			<-reporter.doneChan
 			return nil, fmt.Errorf("init namespace: %w", err)
 		}
 	} else {
 		for _, namespace := range opts.namespaces {
 			if err := reporter.initNamespace(namespace); err != nil {
+				reporter.cancelFunc()
+				<-reporter.doneChan
 				return nil, err
 			}
 		}
