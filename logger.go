@@ -516,8 +516,8 @@ type logQueuer struct {
 }
 
 func (l *logQueuer) work(ctx context.Context, done chan struct{}) {
-	defer l.cleanup()
 	defer close(done)
+	defer l.cleanup()
 
 	for ctx.Err() == nil {
 		select {
