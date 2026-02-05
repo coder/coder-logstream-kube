@@ -510,6 +510,8 @@ type logQueuer struct {
 }
 
 func (l *logQueuer) work(ctx context.Context) {
+	defer l.cleanup()
+
 	for ctx.Err() == nil {
 		select {
 		case log := <-l.q:
@@ -524,6 +526,19 @@ func (l *logQueuer) work(ctx context.Context) {
 			return
 		}
 
+	}
+}
+
+// cleanup stops all retry timers and cleans up resources when the work loop exits.
+func (l *logQueuer) cleanup() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	for token, rs := range l.retries {
+		if rs != nil && rs.timer != nil {
+			rs.timer.Stop()
+		}
+		delete(l.retries, token)
 	}
 }
 
