@@ -675,7 +675,7 @@ func Test_logQueuer(t *testing.T) {
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		go lq.work(ctx)
+		go lq.work(ctx, make(chan struct{}))
 
 		ch <- agentLog{
 			op:           opLog,
@@ -742,7 +742,7 @@ func Test_logQueuer(t *testing.T) {
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		go lq.work(ctx)
+		go lq.work(ctx, make(chan struct{}))
 
 		token := "retry-token"
 		ch <- agentLog{
@@ -905,7 +905,7 @@ func Test_logQueuer(t *testing.T) {
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		go lq.work(ctx)
+		go lq.work(ctx, make(chan struct{}))
 
 		token := "max-retry-token"
 		ch <- agentLog{
@@ -1111,7 +1111,7 @@ func Test_logCache(t *testing.T) {
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		go lq.work(ctx)
+		go lq.work(ctx, make(chan struct{}))
 
 		token := "test-token"
 

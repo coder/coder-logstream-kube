@@ -86,7 +86,11 @@ func newPodEventLogger(ctx context.Context, opts podEventLoggerOptions) (*podEve
 			},
 			maxRetries: opts.maxRetries,
 		},
+		doneChan: make(chan struct{}),
 	}
+
+	// Start the work goroutine once
+	go reporter.lq.work(reporter.ctx, reporter.doneChan)
 
 	// If no namespaces are provided, we listen for events in all namespaces.
 	if len(opts.namespaces) == 0 {
@@ -122,6 +126,8 @@ type podEventLogger struct {
 
 	// closeOnce ensures Close() is idempotent
 	closeOnce sync.Once
+	// doneChan is closed when the work goroutine exits
+	doneChan chan struct{}
 }
 
 // resolveEnvValue resolves the value of an environment variable, supporting both
@@ -163,8 +169,6 @@ func (p *podEventLogger) initNamespace(namespace string) error {
 	// We only track events that happen after the reporter starts.
 	// This is to prevent us from sending duplicate events.
 	startTime := time.Now()
-
-	go p.lq.work(p.ctx)
 
 	podFactory := informers.NewSharedInformerFactoryWithOptions(p.client, 0, informers.WithNamespace(namespace), informers.WithTweakListOptions(func(lo *v1.ListOptions) {
 		lo.FieldSelector = p.fieldSelector
@@ -421,6 +425,8 @@ func (p *podEventLogger) Close() error {
 		close(p.stopChan)
 		close(p.errChan)
 	})
+	// Wait for the work goroutine to exit
+	<-p.doneChan
 	return nil
 }
 
@@ -509,8 +515,9 @@ type logQueuer struct {
 	maxRetries int
 }
 
-func (l *logQueuer) work(ctx context.Context) {
+func (l *logQueuer) work(ctx context.Context, done chan struct{}) {
 	defer l.cleanup()
+	defer close(done)
 
 	for ctx.Err() == nil {
 		select {
