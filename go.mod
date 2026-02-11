@@ -7,7 +7,7 @@ replace tailscale.com => github.com/coder/tailscale v1.1.1-0.20250829055706-6eaf
 
 require (
 	cdr.dev/slog v1.6.2-0.20250703074222-9df5e0a6c145
-	github.com/breml/rootcerts v0.3.1
+	github.com/breml/rootcerts v0.3.4
 	github.com/coder/coder/v2 v2.29.3
 	github.com/coder/quartz v0.3.0
 	github.com/coder/serpent v0.13.0
