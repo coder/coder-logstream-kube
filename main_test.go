@@ -36,9 +36,9 @@ func TestRootCommand_URLValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := root()
-			cmd.SetArgs([]string{"--coder-url", tt.coderURL})
+			inv := cmd.Invoke("--coder-url", tt.coderURL)
 
-			err := cmd.Execute()
+			err := inv.Run()
 
 			if err == nil {
 				t.Errorf("expected error containing %q, got nil", tt.wantError)
