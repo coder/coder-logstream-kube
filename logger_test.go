@@ -684,7 +684,7 @@ func Test_logQueuer(t *testing.T) {
 			log: agentsdk.Log{
 				CreatedAt: time.Now(),
 				Output:    "This is a log.",
-				Level:     codersdk.LogLevelInfo,
+				Level:     codersdk.LogLevelDebug,
 			},
 		}
 
@@ -700,7 +700,7 @@ func Test_logQueuer(t *testing.T) {
 			log: agentsdk.Log{
 				CreatedAt: time.Now(),
 				Output:    "This is a log too.",
-				Level:     codersdk.LogLevelInfo,
+				Level:     codersdk.LogLevelDebug,
 			},
 		}
 
@@ -752,7 +752,7 @@ func Test_logQueuer(t *testing.T) {
 			log: agentsdk.Log{
 				CreatedAt: time.Now(),
 				Output:    "This is a log.",
-				Level:     codersdk.LogLevelInfo,
+				Level:     codersdk.LogLevelDebug,
 			},
 		}
 
@@ -915,7 +915,7 @@ func Test_logQueuer(t *testing.T) {
 			log: agentsdk.Log{
 				CreatedAt: time.Now(),
 				Output:    "This is a log.",
-				Level:     codersdk.LogLevelInfo,
+				Level:     codersdk.LogLevelDebug,
 			},
 		}
 
@@ -973,7 +973,7 @@ func Test_logCache(t *testing.T) {
 			log: agentsdk.Log{
 				CreatedAt: time.Now(),
 				Output:    "First log",
-				Level:     codersdk.LogLevelInfo,
+				Level:     codersdk.LogLevelDebug,
 			},
 		}
 		returnedLogs := lc.push(log1)
@@ -1021,7 +1021,7 @@ func Test_logCache(t *testing.T) {
 			log: agentsdk.Log{
 				CreatedAt: time.Now(),
 				Output:    "Test log",
-				Level:     codersdk.LogLevelInfo,
+				Level:     codersdk.LogLevelDebug,
 			},
 		}
 		lc.push(log)
@@ -1054,7 +1054,7 @@ func Test_logCache(t *testing.T) {
 			log: agentsdk.Log{
 				CreatedAt: time.Now(),
 				Output:    "Log for token1",
-				Level:     codersdk.LogLevelInfo,
+				Level:     codersdk.LogLevelDebug,
 			},
 		}
 		log2 := agentLog{
@@ -1149,7 +1149,7 @@ func Test_logCache(t *testing.T) {
 			log: agentsdk.Log{
 				CreatedAt: time.Now(),
 				Output:    "Real log",
-				Level:     codersdk.LogLevelInfo,
+				Level:     codersdk.LogLevelDebug,
 			},
 		}
 		ch <- realLog
