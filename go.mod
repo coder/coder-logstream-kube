@@ -17,7 +17,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/yamux v0.1.2
 	github.com/stretchr/testify v1.11.1
-	google.golang.org/protobuf v1.36.10
+	google.golang.org/protobuf v1.36.11
 	k8s.io/api v0.34.1
 	k8s.io/apimachinery v0.34.1
 	k8s.io/client-go v0.34.1
