@@ -19,7 +19,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 
-	"cdr.dev/slog"
+	"cdr.dev/slog/v3"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/agentsdk"
 	"github.com/coder/quartz"
@@ -523,6 +523,8 @@ func (l *logQueuer) work(ctx context.Context) {
 
 func (l *logQueuer) newLogger(ctx context.Context, log agentLog) (agentLoggerLifecycle, error) {
 	client := agentsdk.New(l.coderURL, agentsdk.WithFixedToken(log.agentToken))
+	client.Role = "logstream-kube" // skip coderd connection monitoring
+
 	logger := l.logger.With(slog.F("resource_name", log.resourceName))
 	client.SDK.SetLogger(logger)
 
