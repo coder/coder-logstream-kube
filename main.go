@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"cdr.dev/slog"
-	"cdr.dev/slog/sloggers/sloghuman"
+	"cdr.dev/slog/v3"
+	"cdr.dev/slog/v3/sloggers/sloghuman"
 	"github.com/coder/serpent"
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
