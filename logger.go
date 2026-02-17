@@ -86,16 +86,24 @@ func newPodEventLogger(ctx context.Context, opts podEventLoggerOptions) (*podEve
 			},
 			maxRetries: opts.maxRetries,
 		},
+		doneChan: make(chan struct{}),
 	}
+
+	// Start the work goroutine once
+	go reporter.lq.work(reporter.ctx, reporter.doneChan)
 
 	// If no namespaces are provided, we listen for events in all namespaces.
 	if len(opts.namespaces) == 0 {
 		if err := reporter.initNamespace(""); err != nil {
+			reporter.cancelFunc()
+			<-reporter.doneChan
 			return nil, fmt.Errorf("init namespace: %w", err)
 		}
 	} else {
 		for _, namespace := range opts.namespaces {
 			if err := reporter.initNamespace(namespace); err != nil {
+				reporter.cancelFunc()
+				<-reporter.doneChan
 				return nil, err
 			}
 		}
@@ -119,6 +127,11 @@ type podEventLogger struct {
 
 	// hasSyncedFuncs tracks informer cache sync functions for testing
 	hasSyncedFuncs []cache.InformerSynced
+
+	// closeOnce ensures Close() is idempotent
+	closeOnce sync.Once
+	// doneChan is closed when the work goroutine exits
+	doneChan chan struct{}
 }
 
 // resolveEnvValue resolves the value of an environment variable, supporting both
@@ -160,8 +173,6 @@ func (p *podEventLogger) initNamespace(namespace string) error {
 	// We only track events that happen after the reporter starts.
 	// This is to prevent us from sending duplicate events.
 	startTime := time.Now()
-
-	go p.lq.work(p.ctx)
 
 	podFactory := informers.NewSharedInformerFactoryWithOptions(p.client, 0, informers.WithNamespace(namespace), informers.WithTweakListOptions(func(lo *v1.ListOptions) {
 		lo.FieldSelector = p.fieldSelector
@@ -411,10 +422,15 @@ func (p *podEventLogger) sendDelete(token string) {
 }
 
 // Close stops the pod event logger and releases all resources.
+// Close is idempotent and safe to call multiple times.
 func (p *podEventLogger) Close() error {
-	p.cancelFunc()
-	close(p.stopChan)
-	close(p.errChan)
+	p.closeOnce.Do(func() {
+		p.cancelFunc()
+		close(p.stopChan)
+		close(p.errChan)
+	})
+	// Wait for the work goroutine to exit
+	<-p.doneChan
 	return nil
 }
 
@@ -503,7 +519,10 @@ type logQueuer struct {
 	maxRetries int
 }
 
-func (l *logQueuer) work(ctx context.Context) {
+func (l *logQueuer) work(ctx context.Context, done chan struct{}) {
+	defer close(done)
+	defer l.cleanup()
+
 	for ctx.Err() == nil {
 		select {
 		case log := <-l.q:
@@ -518,6 +537,19 @@ func (l *logQueuer) work(ctx context.Context) {
 			return
 		}
 
+	}
+}
+
+// cleanup stops all retry timers and cleans up resources when the work loop exits.
+func (l *logQueuer) cleanup() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	for token, rs := range l.retries {
+		if rs != nil && rs.timer != nil {
+			rs.timer.Stop()
+		}
+		delete(l.retries, token)
 	}
 }
 
