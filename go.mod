@@ -13,7 +13,7 @@ require (
 	github.com/coder/serpent v0.13.0
 	github.com/coder/websocket v1.8.14
 	github.com/fatih/color v1.18.0
-	github.com/go-chi/chi/v5 v5.2.2
+	github.com/go-chi/chi/v5 v5.2.5
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/yamux v0.1.2
 	github.com/stretchr/testify v1.11.1
