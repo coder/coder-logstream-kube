@@ -23,8 +23,8 @@ import (
 	"storj.io/drpc/drpcmux"
 	"storj.io/drpc/drpcserver"
 
-	"cdr.dev/slog"
-	"cdr.dev/slog/sloggers/slogtest"
+	"cdr.dev/slog/v3"
+	"cdr.dev/slog/v3/sloggers/slogtest"
 	"github.com/coder/coder/v2/agent/proto"
 	"github.com/coder/coder/v2/coderd/httpapi"
 	"github.com/coder/coder/v2/codersdk"
@@ -1416,6 +1416,10 @@ func (*fakeAgentAPI) ReportConnection(_ context.Context, _ *proto.ReportConnecti
 func (f *fakeAgentAPI) BatchCreateLogs(_ context.Context, req *proto.BatchCreateLogsRequest) (*proto.BatchCreateLogsResponse, error) {
 	f.logs <- req.Logs
 	return &proto.BatchCreateLogsResponse{}, nil
+}
+
+func (f *fakeAgentAPI) ReportBoundaryLogs(_ context.Context, _ *proto.ReportBoundaryLogsRequest) (*proto.ReportBoundaryLogsResponse, error) {
+	return &proto.ReportBoundaryLogsResponse{}, nil
 }
 
 func (f *fakeAgentAPI) PostLogSource(w http.ResponseWriter, r *http.Request) {

@@ -19,7 +19,10 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 
-	"cdr.dev/slog"
+	"cdr.dev/slog/v3"
+	"golang.org/x/mod/semver"
+	"storj.io/drpc"
+
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/agentsdk"
 	"github.com/coder/quartz"
@@ -555,6 +558,7 @@ func (l *logQueuer) cleanup() {
 
 func (l *logQueuer) newLogger(ctx context.Context, log agentLog) (agentLoggerLifecycle, error) {
 	client := agentsdk.New(l.coderURL, agentsdk.WithFixedToken(log.agentToken))
+
 	logger := l.logger.With(slog.F("resource_name", log.resourceName))
 	client.SDK.SetLogger(logger)
 
@@ -575,16 +579,42 @@ func (l *logQueuer) newLogger(ctx context.Context, log agentLog) (agentLoggerLif
 
 	gracefulCtx, gracefulCancel := context.WithCancel(context.Background())
 
-	// connect to Agent v2.0 API, since we don't need features added later.
-	// This maximizes compatibility.
-	arpc, err := client.ConnectRPC20(gracefulCtx)
-	if err != nil {
-		logger.Error(ctx, "drpc connect", slog.Error(err))
-		gracefulCancel()
-		return agentLoggerLifecycle{}, err
+	// Fetch build info to determine server capabilities.
+	// The role query parameter was added in Coder v2.31.0. Servers at or
+	// above this version support ConnectRPC28WithRole, which sends
+	// role="logstream-kube" to skip connection monitoring (prevents false
+	// agent connectivity state changes).
+	buildInfo, buildInfoErr := client.SDK.BuildInfo(ctx)
+	if buildInfoErr != nil {
+		logger.Warn(ctx, "failed to get build info, falling back to ConnectRPC20", slog.Error(buildInfoErr))
+	}
+	supportsRole := buildInfoErr == nil && versionAtLeast(buildInfo.Version, "v2.31.0")
+
+	var (
+		logDest agentsdk.LogDest
+		rpcConn drpc.Conn
+	)
+	if supportsRole {
+		arpc, _, err := client.ConnectRPC28WithRole(gracefulCtx, "logstream-kube")
+		if err != nil {
+			logger.Error(ctx, "drpc connect with role", slog.Error(err))
+			gracefulCancel()
+			return agentLoggerLifecycle{}, err
+		}
+		logDest = arpc
+		rpcConn = arpc.DRPCConn()
+	} else {
+		arpc, err := client.ConnectRPC20(gracefulCtx)
+		if err != nil {
+			logger.Error(ctx, "drpc connect", slog.Error(err))
+			gracefulCancel()
+			return agentLoggerLifecycle{}, err
+		}
+		logDest = arpc
+		rpcConn = arpc.DRPCConn()
 	}
 	go func() {
-		err := ls.SendLoop(gracefulCtx, arpc)
+		err := ls.SendLoop(gracefulCtx, logDest)
 		// if the send loop exits on its own without the context
 		// canceling, timeout the logger and force it to recreate.
 		if err != nil && ctx.Err() == nil {
@@ -600,7 +630,7 @@ func (l *logQueuer) newLogger(ctx context.Context, log agentLog) (agentLoggerLif
 		scriptLogger: sl,
 		close: func() {
 			defer func() {
-				_ = arpc.DRPCConn().Close()
+				_ = rpcConn.Close()
 			}()
 			defer client.SDK.HTTPClient.CloseIdleConnections()
 			// We could be stopping for reasons other than the timeout. If
@@ -780,6 +810,12 @@ func (l *logQueuer) clearRetryLocked(token string) {
 		}
 		delete(l.retries, token)
 	}
+}
+
+// versionAtLeast returns true if version is a valid semver string and is
+// greater than or equal to minimum.
+func versionAtLeast(version, minimum string) bool {
+	return semver.IsValid(version) && semver.Compare(version, minimum) >= 0
 }
 
 func newColor(value ...color.Attribute) *color.Color {
