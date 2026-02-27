@@ -52,11 +52,16 @@ jobs:
       - name: Setup GCloud SDK
         uses: "google-github-actions/setup-gcloud@v3"
 
-      - name: Publish Helm Chart
+      - name: Package Helm Chart
         run: |
           set -euo pipefail
           version="$(./scripts/version.sh)"
           ./scripts/helm.sh --version $version
+
+      - name: Publish Helm Chart to traditional registry
+        run: |
+          set -euo pipefail
+          version="$(./scripts/version.sh)"
 
           mkdir -p build/helm
           cp "build/${version}.tgz" build/helm
@@ -64,6 +69,12 @@ jobs:
           helm repo index build/helm --url https://helm.coder.com/logstream-kube --merge build/helm/index.yaml
           gsutil -h "Cache-Control:no-cache,max-age=0" cp build/helm/${version}.tgz gs://helm.coder.com/logstream-kube
           gsutil -h "Cache-Control:no-cache,max-age=0" cp build/helm/index.yaml gs://helm.coder.com/logstream-kube
+
+      - name: Publish Helm Chart to OCI registry
+        run: |
+          set -euo pipefail
+          version="$(./scripts/version.sh)"
+          helm push "build/${version}.tgz" oci://ghcr.io/coder/chart
 
       - name: Create and upload release
         run: |
