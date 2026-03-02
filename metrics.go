@@ -21,6 +21,12 @@ var (
 
 func init() {
 	prometheus.MustRegister(requestsTotal, errorsTotal)
+
+	// Initialize all label combinations so they appear in /metrics output
+	// even before the first increment.
+	requestsTotal.WithLabelValues("success")
+	requestsTotal.WithLabelValues("failure")
+	errorsTotal.WithLabelValues("network")
 }
 
 func metricsHandler() http.Handler {
