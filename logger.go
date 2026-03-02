@@ -571,6 +571,8 @@ func (l *logQueuer) newLogger(ctx context.Context, log agentLog) (agentLoggerLif
 		// Posting the log source failed, which affects how logs appear.
 		// We'll retry to ensure the log source is properly registered.
 		logger.Error(ctx, "post log source", slog.Error(err))
+		requestsTotal.WithLabelValues("failure").Inc()
+		errorsTotal.WithLabelValues("network").Inc()
 		return agentLoggerLifecycle{}, err
 	}
 
@@ -598,6 +600,8 @@ func (l *logQueuer) newLogger(ctx context.Context, log agentLog) (agentLoggerLif
 		arpc, _, err := client.ConnectRPC28WithRole(gracefulCtx, "logstream-kube")
 		if err != nil {
 			logger.Error(ctx, "drpc connect with role", slog.Error(err))
+			requestsTotal.WithLabelValues("failure").Inc()
+			errorsTotal.WithLabelValues("network").Inc()
 			gracefulCancel()
 			return agentLoggerLifecycle{}, err
 		}
@@ -607,12 +611,15 @@ func (l *logQueuer) newLogger(ctx context.Context, log agentLog) (agentLoggerLif
 		arpc, err := client.ConnectRPC20(gracefulCtx)
 		if err != nil {
 			logger.Error(ctx, "drpc connect", slog.Error(err))
+			requestsTotal.WithLabelValues("failure").Inc()
+			errorsTotal.WithLabelValues("network").Inc()
 			gracefulCancel()
 			return agentLoggerLifecycle{}, err
 		}
 		logDest = arpc
 		rpcConn = arpc.DRPCConn()
 	}
+	requestsTotal.WithLabelValues("success").Inc()
 	go func() {
 		err := ls.SendLoop(gracefulCtx, logDest)
 		// if the send loop exits on its own without the context
@@ -691,9 +698,12 @@ func (l *logQueuer) processLog(ctx context.Context, log agentLog) {
 		return
 	}
 	if err := lgr.scriptLogger.Send(ctx, queuedLogs...); err != nil {
+		requestsTotal.WithLabelValues("failure").Inc()
+		errorsTotal.WithLabelValues("network").Inc()
 		l.scheduleRetry(ctx, log.agentToken)
 		return
 	}
+	requestsTotal.WithLabelValues("success").Inc()
 	l.clearRetryLocked(log.agentToken)
 	l.logCache.delete(log.agentToken)
 }

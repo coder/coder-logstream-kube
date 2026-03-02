@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -30,6 +31,7 @@ func root() *serpent.Command {
 		kubeConfig    string
 		namespacesStr string
 		labelSelector string
+		metricsAddr   string
 	)
 	cmd := &serpent.Command{
 		Use:   "coder-logstream-kube",
@@ -73,6 +75,14 @@ func root() *serpent.Command {
 				Value:         serpent.StringOf(&labelSelector),
 				Description:   "Label selector to use when listing pods.",
 			},
+			{
+				Name:        "metrics-addr",
+				Flag:        "metrics-addr",
+				Env:         "CODER_LOGSTREAM_METRICS_ADDR",
+				Default:     ":9100",
+				Value:       serpent.StringOf(&metricsAddr),
+				Description: "Address to serve Prometheus metrics on. Set to empty to disable.",
+			},
 		},
 		Handler: func(inv *serpent.Invocation) error {
 			if coderURL == "" {
@@ -115,13 +125,15 @@ func root() *serpent.Command {
 				}
 			}
 
+			logger := slog.Make(sloghuman.Sink(inv.Stderr)).Leveled(slog.LevelDebug)
+
 			reporter, err := newPodEventLogger(inv.Context(), podEventLoggerOptions{
 				coderURL:      parsedURL,
 				client:        client,
 				namespaces:    namespaces,
 				fieldSelector: fieldSelector,
 				labelSelector: labelSelector,
-				logger:        slog.Make(sloghuman.Sink(inv.Stderr)).Leveled(slog.LevelDebug),
+				logger:        logger,
 				maxRetries:    15, // 15 retries is the default max retries for a log send failure.
 			})
 			if err != nil {
@@ -130,6 +142,17 @@ func root() *serpent.Command {
 			defer func() {
 				_ = reporter.Close()
 			}()
+
+			if metricsAddr != "" {
+				mux := http.NewServeMux()
+				mux.Handle("/metrics", metricsHandler())
+				go func() {
+					if err := http.ListenAndServe(metricsAddr, mux); err != nil {
+						logger.Error(inv.Context(), "metrics server failed", slog.Error(err))
+					}
+				}()
+			}
+
 			select {
 			case err := <-reporter.errChan:
 				return fmt.Errorf("pod event reporter: %w", err)
