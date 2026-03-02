@@ -79,7 +79,7 @@ func TestMetricsEndpoint(t *testing.T) {
 
 	resp, err := http.Get("http://" + addr + "/metrics")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
