@@ -79,7 +79,7 @@ func root() *serpent.Command {
 				Name:        "metrics-addr",
 				Flag:        "metrics-addr",
 				Env:         "CODER_LOGSTREAM_METRICS_ADDR",
-				Default:     ":9100",
+				Default:     "",
 				Value:       serpent.StringOf(&metricsAddr),
 				Description: "Address to serve Prometheus metrics on. Set to empty to disable.",
 			},
