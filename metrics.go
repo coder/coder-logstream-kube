@@ -65,14 +65,14 @@ func (c *instrumentedClient) PostLogSource(ctx context.Context, req agentsdk.Pos
 // server capabilities, recording metrics for the attempt.
 func (c *instrumentedClient) connectLogDest(ctx context.Context, supportsRole bool) (agentsdk.LogDest, drpc.Conn, error) {
 	if supportsRole {
-		arpc, _, err := c.Client.ConnectRPC28WithRole(ctx, "logstream-kube")
+		arpc, _, err := c.ConnectRPC28WithRole(ctx, "logstream-kube")
 		record("ConnectRPC", err)
 		if err != nil {
 			return nil, nil, err
 		}
 		return arpc, arpc.DRPCConn(), nil
 	}
-	arpc, err := c.Client.ConnectRPC20(ctx)
+	arpc, err := c.ConnectRPC20(ctx)
 	record("ConnectRPC", err)
 	if err != nil {
 		return nil, nil, err
