@@ -21,7 +21,6 @@ import (
 
 	"cdr.dev/slog/v3"
 	"golang.org/x/mod/semver"
-	"storj.io/drpc"
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/agentsdk"
@@ -557,7 +556,7 @@ func (l *logQueuer) cleanup() {
 }
 
 func (l *logQueuer) newLogger(ctx context.Context, log agentLog) (agentLoggerLifecycle, error) {
-	client := agentsdk.New(l.coderURL, agentsdk.WithFixedToken(log.agentToken))
+	client := newInstrumentedClient(l.coderURL, log.agentToken)
 
 	logger := l.logger.With(slog.F("resource_name", log.resourceName))
 	client.SDK.SetLogger(logger)
@@ -571,8 +570,6 @@ func (l *logQueuer) newLogger(ctx context.Context, log agentLog) (agentLoggerLif
 		// Posting the log source failed, which affects how logs appear.
 		// We'll retry to ensure the log source is properly registered.
 		logger.Error(ctx, "post log source", slog.Error(err))
-		requestsTotal.WithLabelValues("failure").Inc()
-		errorsTotal.WithLabelValues("network").Inc()
 		return agentLoggerLifecycle{}, err
 	}
 
@@ -592,34 +589,12 @@ func (l *logQueuer) newLogger(ctx context.Context, log agentLog) (agentLoggerLif
 	}
 	supportsRole := buildInfoErr == nil && versionAtLeast(buildInfo.Version, "v2.31.0")
 
-	var (
-		logDest agentsdk.LogDest
-		rpcConn drpc.Conn
-	)
-	if supportsRole {
-		arpc, _, err := client.ConnectRPC28WithRole(gracefulCtx, "logstream-kube")
-		if err != nil {
-			logger.Error(ctx, "drpc connect with role", slog.Error(err))
-			requestsTotal.WithLabelValues("failure").Inc()
-			errorsTotal.WithLabelValues("network").Inc()
-			gracefulCancel()
-			return agentLoggerLifecycle{}, err
-		}
-		logDest = arpc
-		rpcConn = arpc.DRPCConn()
-	} else {
-		arpc, err := client.ConnectRPC20(gracefulCtx)
-		if err != nil {
-			logger.Error(ctx, "drpc connect", slog.Error(err))
-			requestsTotal.WithLabelValues("failure").Inc()
-			errorsTotal.WithLabelValues("network").Inc()
-			gracefulCancel()
-			return agentLoggerLifecycle{}, err
-		}
-		logDest = arpc
-		rpcConn = arpc.DRPCConn()
+	logDest, rpcConn, err := client.connectLogDest(gracefulCtx, supportsRole)
+	if err != nil {
+		logger.Error(ctx, "drpc connect", slog.Error(err))
+		gracefulCancel()
+		return agentLoggerLifecycle{}, err
 	}
-	requestsTotal.WithLabelValues("success").Inc()
 	go func() {
 		err := ls.SendLoop(gracefulCtx, logDest)
 		// if the send loop exits on its own without the context
@@ -697,13 +672,12 @@ func (l *logQueuer) processLog(ctx context.Context, log agentLog) {
 	if len(queuedLogs) == 0 {
 		return
 	}
-	if err := lgr.scriptLogger.Send(ctx, queuedLogs...); err != nil {
-		requestsTotal.WithLabelValues("failure").Inc()
-		errorsTotal.WithLabelValues("network").Inc()
+	sendErr := lgr.scriptLogger.Send(ctx, queuedLogs...)
+	recordSendResult(sendErr)
+	if sendErr != nil {
 		l.scheduleRetry(ctx, log.agentToken)
 		return
 	}
-	requestsTotal.WithLabelValues("success").Inc()
 	l.clearRetryLocked(log.agentToken)
 	l.logCache.delete(log.agentToken)
 }

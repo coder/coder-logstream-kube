@@ -13,10 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func getCounterValue(t *testing.T, cv *prometheus.CounterVec, label string) float64 {
+func getCounterValue(t *testing.T, cv *prometheus.CounterVec, labels ...string) float64 {
 	t.Helper()
 	m := &dto.Metric{}
-	c, err := cv.GetMetricWithLabelValues(label)
+	c, err := cv.GetMetricWithLabelValues(labels...)
 	require.NoError(t, err)
 	require.NoError(t, c.Write(m))
 	return m.GetCounter().GetValue()
@@ -27,19 +27,21 @@ func TestMetricsIncrement(t *testing.T) {
 
 	// Record baseline values (metrics are global and may have been
 	// incremented by other tests running in the same process).
-	baseSuccess := getCounterValue(t, requestsTotal, "success")
-	baseFailure := getCounterValue(t, requestsTotal, "failure")
-	baseNetwork := getCounterValue(t, errorsTotal, "network")
+	baseSuccess := getCounterValue(t, requestsTotal, "PostLogSource", "success")
+	baseFailure := getCounterValue(t, requestsTotal, "PostLogSource", "failure")
+	baseSendSuccess := getCounterValue(t, requestsTotal, "SendLog", "success")
 
-	// Simulate success
-	requestsTotal.WithLabelValues("success").Inc()
-	require.Equal(t, baseSuccess+1, getCounterValue(t, requestsTotal, "success"))
+	// Simulate success via record helper
+	record("PostLogSource", nil)
+	require.Equal(t, baseSuccess+1, getCounterValue(t, requestsTotal, "PostLogSource", "success"))
 
-	// Simulate failure
-	requestsTotal.WithLabelValues("failure").Inc()
-	errorsTotal.WithLabelValues("network").Inc()
-	require.Equal(t, baseFailure+1, getCounterValue(t, requestsTotal, "failure"))
-	require.Equal(t, baseNetwork+1, getCounterValue(t, errorsTotal, "network"))
+	// Simulate failure via record helper
+	record("PostLogSource", io.ErrUnexpectedEOF)
+	require.Equal(t, baseFailure+1, getCounterValue(t, requestsTotal, "PostLogSource", "failure"))
+
+	// Simulate send success
+	recordSendResult(nil)
+	require.Equal(t, baseSendSuccess+1, getCounterValue(t, requestsTotal, "SendLog", "success"))
 }
 
 func TestMetricsHandler(t *testing.T) {
@@ -75,7 +77,7 @@ func TestMetricsEndpoint(t *testing.T) {
 	}, 2*time.Second, 50*time.Millisecond)
 
 	// Bump a counter and verify it appears in the output.
-	requestsTotal.WithLabelValues("success").Inc()
+	record("PostLogSource", nil)
 
 	resp, err := http.Get("http://" + addr + "/metrics")
 	require.NoError(t, err)
@@ -86,6 +88,4 @@ func TestMetricsEndpoint(t *testing.T) {
 
 	require.True(t, strings.Contains(string(body), "coder_logstream_requests_total"),
 		"expected coder_logstream_requests_total in metrics output")
-	require.True(t, strings.Contains(string(body), "coder_logstream_errors_total"),
-		"expected coder_logstream_errors_total in metrics output")
 }
