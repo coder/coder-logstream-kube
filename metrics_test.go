@@ -25,34 +25,38 @@ func getCounterValue(t *testing.T, cv *prometheus.CounterVec, labels ...string) 
 func TestMetricsIncrement(t *testing.T) {
 	t.Parallel()
 
-	// Record baseline values (metrics are global and may have been
-	// incremented by other tests running in the same process).
-	baseSuccess := getCounterValue(t, requestsTotal, "PostLogSource", "success")
-	baseFailure := getCounterValue(t, requestsTotal, "PostLogSource", "failure")
-	baseSendSuccess := getCounterValue(t, requestsTotal, "SendLog", "success")
+	m := newMetricsCollector()
 
-	// Simulate success via record helper
-	record("PostLogSource", nil)
-	require.Equal(t, baseSuccess+1, getCounterValue(t, requestsTotal, "PostLogSource", "success"))
+	// All counters start at zero.
+	require.Equal(t, float64(0), getCounterValue(t, m.requestsTotal, "PostLogSource", "success"))
+	require.Equal(t, float64(0), getCounterValue(t, m.requestsTotal, "PostLogSource", "failure"))
+	require.Equal(t, float64(0), getCounterValue(t, m.requestsTotal, "SendLog", "success"))
 
-	// Simulate failure via record helper
-	record("PostLogSource", io.ErrUnexpectedEOF)
-	require.Equal(t, baseFailure+1, getCounterValue(t, requestsTotal, "PostLogSource", "failure"))
+	// Simulate success
+	m.record(methodPostLogSource, nil)
+	require.Equal(t, float64(1), getCounterValue(t, m.requestsTotal, "PostLogSource", "success"))
+
+	// Simulate failure
+	m.record(methodPostLogSource, io.ErrUnexpectedEOF)
+	require.Equal(t, float64(1), getCounterValue(t, m.requestsTotal, "PostLogSource", "failure"))
 
 	// Simulate send success
-	recordSendResult(nil)
-	require.Equal(t, baseSendSuccess+1, getCounterValue(t, requestsTotal, "SendLog", "success"))
+	m.record(methodSendLog, nil)
+	require.Equal(t, float64(1), getCounterValue(t, m.requestsTotal, "SendLog", "success"))
 }
 
 func TestMetricsHandler(t *testing.T) {
 	t.Parallel()
 
-	handler := metricsHandler()
+	m := newMetricsCollector()
+	handler := m.handler()
 	require.NotNil(t, handler)
 }
 
 func TestMetricsEndpoint(t *testing.T) {
 	t.Parallel()
+
+	m := newMetricsCollector()
 
 	// Pick a random free port.
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -61,7 +65,7 @@ func TestMetricsEndpoint(t *testing.T) {
 	_ = listener.Close()
 
 	mux := http.NewServeMux()
-	mux.Handle("/metrics", metricsHandler())
+	mux.Handle("/metrics", m.handler())
 	srv := &http.Server{Addr: addr, Handler: mux}
 	go func() { _ = srv.ListenAndServe() }()
 	t.Cleanup(func() { _ = srv.Close() })
@@ -77,7 +81,7 @@ func TestMetricsEndpoint(t *testing.T) {
 	}, 2*time.Second, 50*time.Millisecond)
 
 	// Bump a counter and verify it appears in the output.
-	record("PostLogSource", nil)
+	m.record(methodPostLogSource, nil)
 
 	resp, err := http.Get("http://" + addr + "/metrics")
 	require.NoError(t, err)

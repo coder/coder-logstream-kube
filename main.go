@@ -126,6 +126,7 @@ func root() *serpent.Command {
 			}
 
 			logger := slog.Make(sloghuman.Sink(inv.Stderr)).Leveled(slog.LevelDebug)
+			metrics := newMetricsCollector()
 
 			reporter, err := newPodEventLogger(inv.Context(), podEventLoggerOptions{
 				coderURL:      parsedURL,
@@ -135,6 +136,7 @@ func root() *serpent.Command {
 				labelSelector: labelSelector,
 				logger:        logger,
 				maxRetries:    15, // 15 retries is the default max retries for a log send failure.
+				metrics:       metrics,
 			})
 			if err != nil {
 				return fmt.Errorf("create pod event reporter: %w", err)
@@ -145,7 +147,7 @@ func root() *serpent.Command {
 
 			if metricsAddr != "" {
 				mux := http.NewServeMux()
-				mux.Handle("/metrics", metricsHandler())
+				mux.Handle("/metrics", metrics.handler())
 				go func() {
 					if err := http.ListenAndServe(metricsAddr, mux); err != nil {
 						logger.Error(inv.Context(), "metrics server failed", slog.Error(err))

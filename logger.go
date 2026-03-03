@@ -42,6 +42,8 @@ type podEventLoggerOptions struct {
 	// maxRetries is the maximum number of retries for a log send failure.
 	maxRetries int
 
+	metrics *metricsCollector
+
 	// The following fields are optional!
 	namespaces    []string
 	fieldSelector string
@@ -61,6 +63,9 @@ func newPodEventLogger(ctx context.Context, opts podEventLoggerOptions) (*podEve
 
 	if opts.maxRetries == 0 {
 		opts.maxRetries = 10
+	}
+	if opts.metrics == nil {
+		opts.metrics = newMetricsCollector()
 	}
 
 	logCh := make(chan agentLog, 512)
@@ -87,6 +92,7 @@ func newPodEventLogger(ctx context.Context, opts podEventLoggerOptions) (*podEve
 				logs: map[string][]agentsdk.Log{},
 			},
 			maxRetries: opts.maxRetries,
+			metrics:    opts.metrics,
 		},
 		doneChan: make(chan struct{}),
 	}
@@ -519,6 +525,8 @@ type logQueuer struct {
 	retries map[string]*retryState
 	// maxRetries is the maximum number of retries for a log send failure.
 	maxRetries int
+
+	metrics *metricsCollector
 }
 
 func (l *logQueuer) work(ctx context.Context, done chan struct{}) {
@@ -556,7 +564,7 @@ func (l *logQueuer) cleanup() {
 }
 
 func (l *logQueuer) newLogger(ctx context.Context, log agentLog) (agentLoggerLifecycle, error) {
-	client := newInstrumentedClient(l.coderURL, log.agentToken)
+	client := newInstrumentedClient(l.coderURL, log.agentToken, l.metrics)
 
 	logger := l.logger.With(slog.F("resource_name", log.resourceName))
 	client.SDK.SetLogger(logger)
@@ -673,7 +681,7 @@ func (l *logQueuer) processLog(ctx context.Context, log agentLog) {
 		return
 	}
 	sendErr := lgr.scriptLogger.Send(ctx, queuedLogs...)
-	recordSendResult(sendErr)
+	l.metrics.record(methodSendLog, sendErr)
 	if sendErr != nil {
 		l.scheduleRetry(ctx, log.agentToken)
 		return

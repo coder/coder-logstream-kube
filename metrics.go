@@ -12,33 +12,57 @@ import (
 	"storj.io/drpc"
 )
 
-var (
-	requestsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+// requestMethod identifies the API method being called.
+type requestMethod string
+
+const (
+	methodPostLogSource requestMethod = "PostLogSource"
+	methodConnectRPC    requestMethod = "ConnectRPC"
+	methodSendLog       requestMethod = "SendLog"
+)
+
+// allMethods is used to pre-initialize all label combinations.
+var allMethods = []requestMethod{methodPostLogSource, methodConnectRPC, methodSendLog}
+
+// metricsCollector holds Prometheus metrics for the application.
+// It uses a custom registry so metrics are not global, making
+// tests deterministic and avoiding flakes from parallel execution.
+type metricsCollector struct {
+	registry      *prometheus.Registry
+	requestsTotal *prometheus.CounterVec
+}
+
+func newMetricsCollector() *metricsCollector {
+	requestsTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "coder_logstream_requests_total",
 		Help: "Total number of requests to the Coder API.",
 	}, []string{"method", "status"})
-)
 
-func init() {
-	prometheus.MustRegister(requestsTotal)
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(requestsTotal)
 
-	// Initialize label combinations so they appear in /metrics at zero.
-	for _, method := range []string{"PostLogSource", "ConnectRPC", "SendLog"} {
-		requestsTotal.WithLabelValues(method, "success")
-		requestsTotal.WithLabelValues(method, "failure")
+	// Initialize all label combinations so they appear in /metrics at zero.
+	for _, method := range allMethods {
+		requestsTotal.WithLabelValues(string(method), "success")
+		requestsTotal.WithLabelValues(string(method), "failure")
+	}
+
+	return &metricsCollector{
+		registry:      registry,
+		requestsTotal: requestsTotal,
 	}
 }
 
-func metricsHandler() http.Handler {
-	return promhttp.Handler()
+func (m *metricsCollector) handler() http.Handler {
+	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
 }
 
-// record is a helper that increments the appropriate request counter.
-func record(method string, err error) {
+// record increments the appropriate request counter.
+func (m *metricsCollector) record(method requestMethod, err error) {
 	if err != nil {
-		requestsTotal.WithLabelValues(method, "failure").Inc()
+		m.requestsTotal.WithLabelValues(string(method), "failure").Inc()
 	} else {
-		requestsTotal.WithLabelValues(method, "success").Inc()
+		m.requestsTotal.WithLabelValues(string(method), "success").Inc()
 	}
 }
 
@@ -47,17 +71,19 @@ func record(method string, err error) {
 // rather than scattered across call sites.
 type instrumentedClient struct {
 	*agentsdk.Client
+	metrics *metricsCollector
 }
 
-func newInstrumentedClient(coderURL *url.URL, token string) *instrumentedClient {
+func newInstrumentedClient(coderURL *url.URL, token string, metrics *metricsCollector) *instrumentedClient {
 	return &instrumentedClient{
-		Client: agentsdk.New(coderURL, agentsdk.WithFixedToken(token)),
+		Client:  agentsdk.New(coderURL, agentsdk.WithFixedToken(token)),
+		metrics: metrics,
 	}
 }
 
 func (c *instrumentedClient) PostLogSource(ctx context.Context, req agentsdk.PostLogSourceRequest) (codersdk.WorkspaceAgentLogSource, error) {
 	resp, err := c.Client.PostLogSource(ctx, req)
-	record("PostLogSource", err)
+	c.metrics.record(methodPostLogSource, err)
 	return resp, err
 }
 
@@ -66,21 +92,16 @@ func (c *instrumentedClient) PostLogSource(ctx context.Context, req agentsdk.Pos
 func (c *instrumentedClient) connectLogDest(ctx context.Context, supportsRole bool) (agentsdk.LogDest, drpc.Conn, error) {
 	if supportsRole {
 		arpc, _, err := c.ConnectRPC28WithRole(ctx, "logstream-kube")
-		record("ConnectRPC", err)
+		c.metrics.record(methodConnectRPC, err)
 		if err != nil {
 			return nil, nil, err
 		}
 		return arpc, arpc.DRPCConn(), nil
 	}
 	arpc, err := c.ConnectRPC20(ctx)
-	record("ConnectRPC", err)
+	c.metrics.record(methodConnectRPC, err)
 	if err != nil {
 		return nil, nil, err
 	}
 	return arpc, arpc.DRPCConn(), nil
-}
-
-// recordSendResult records the result of a log send operation.
-func recordSendResult(err error) {
-	record("SendLog", err)
 }

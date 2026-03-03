@@ -662,6 +662,7 @@ func Test_logQueuer(t *testing.T) {
 
 		ch := make(chan agentLog)
 		lq := &logQueuer{
+			metrics: newMetricsCollector(),
 			logger:    slogtest.Make(t, nil),
 			clock:     clock,
 			q:         ch,
@@ -728,6 +729,7 @@ func Test_logQueuer(t *testing.T) {
 			IgnoreErrors: true,
 		})
 		lq := &logQueuer{
+			metrics: newMetricsCollector(),
 			logger:    logger,
 			clock:     clock,
 			q:         ch,
@@ -815,6 +817,7 @@ func Test_logQueuer(t *testing.T) {
 		clock := quartz.NewMock(t)
 		ch := make(chan agentLog, 10)
 		lq := &logQueuer{
+			metrics: newMetricsCollector(),
 			logger: slogtest.Make(t, nil),
 			clock:  clock,
 			q:      ch,
@@ -854,6 +857,7 @@ func Test_logQueuer(t *testing.T) {
 		clock := quartz.NewMock(t)
 		ch := make(chan agentLog, 10)
 		lq := &logQueuer{
+			metrics: newMetricsCollector(),
 			logger: slogtest.Make(t, nil),
 			clock:  clock,
 			q:      ch,
@@ -890,6 +894,7 @@ func Test_logQueuer(t *testing.T) {
 			IgnoreErrors: true,
 		})
 		lq := &logQueuer{
+			metrics: newMetricsCollector(),
 			logger:    logger,
 			clock:     clock,
 			q:         ch,
@@ -1098,6 +1103,7 @@ func Test_logCache(t *testing.T) {
 
 		ch := make(chan agentLog, 10)
 		lq := &logQueuer{
+			metrics: newMetricsCollector(),
 			logger:    slogtest.Make(t, nil),
 			clock:     clock,
 			q:         ch,
