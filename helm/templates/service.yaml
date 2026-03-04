@@ -82,6 +82,12 @@ spec:
         {{- with .Values.labels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+      {{- if .Values.metrics.enabled }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.metrics.port | quote }}
+        prometheus.io/path: "/metrics"
+      {{- end }}
     spec:
       serviceAccountName: {{ .Values.serviceAccount.name | quote }}
       restartPolicy: Always
@@ -111,10 +117,23 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command:
             - /coder-logstream-kube
+          {{- if .Values.metrics.enabled }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+          {{- end }}
           resources: {{ toYaml .Values.resources | nindent 12 }}
           env:
             - name: CODER_URL
               value: {{ .Values.url }}
+            {{- if .Values.metrics.enabled }}
+            - name: CODER_LOGSTREAM_METRICS_ADDR
+              value: ":{{ .Values.metrics.port }}"
+            {{- else }}
+            - name: CODER_LOGSTREAM_METRICS_ADDR
+              value: ""
+            {{- end }}
             {{- if .Values.namespaces }}
             - name: CODER_NAMESPACES
               value: {{ join "," .Values.namespaces }}

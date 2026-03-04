@@ -86,6 +86,13 @@ tolerations:
   #   value: "value"
   #   effect: "NoSchedule"
 
+# metrics -- Prometheus metrics configuration.
+metrics:
+  # metrics.enabled -- Whether to expose a Prometheus /metrics endpoint.
+  enabled: false
+  # metrics.port -- The port to serve Prometheus metrics on.
+  port: 9100
+
 # labels -- The pod labels for coder-logstream-kube. See:
 # https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/
 labels: {}

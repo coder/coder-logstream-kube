@@ -21,7 +21,6 @@ import (
 
 	"cdr.dev/slog/v3"
 	"golang.org/x/mod/semver"
-	"storj.io/drpc"
 
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/agentsdk"
@@ -43,6 +42,8 @@ type podEventLoggerOptions struct {
 	// maxRetries is the maximum number of retries for a log send failure.
 	maxRetries int
 
+	metrics *metricsCollector
+
 	// The following fields are optional!
 	namespaces    []string
 	fieldSelector string
@@ -62,6 +63,9 @@ func newPodEventLogger(ctx context.Context, opts podEventLoggerOptions) (*podEve
 
 	if opts.maxRetries == 0 {
 		opts.maxRetries = 10
+	}
+	if opts.metrics == nil {
+		opts.metrics = newMetricsCollector()
 	}
 
 	logCh := make(chan agentLog, 512)
@@ -88,6 +92,7 @@ func newPodEventLogger(ctx context.Context, opts podEventLoggerOptions) (*podEve
 				logs: map[string][]agentsdk.Log{},
 			},
 			maxRetries: opts.maxRetries,
+			metrics:    opts.metrics,
 		},
 		doneChan: make(chan struct{}),
 	}
@@ -520,6 +525,8 @@ type logQueuer struct {
 	retries map[string]*retryState
 	// maxRetries is the maximum number of retries for a log send failure.
 	maxRetries int
+
+	metrics *metricsCollector
 }
 
 func (l *logQueuer) work(ctx context.Context, done chan struct{}) {
@@ -557,7 +564,7 @@ func (l *logQueuer) cleanup() {
 }
 
 func (l *logQueuer) newLogger(ctx context.Context, log agentLog) (agentLoggerLifecycle, error) {
-	client := agentsdk.New(l.coderURL, agentsdk.WithFixedToken(log.agentToken))
+	client := newInstrumentedClient(l.coderURL, log.agentToken, l.metrics)
 
 	logger := l.logger.With(slog.F("resource_name", log.resourceName))
 	client.SDK.SetLogger(logger)
@@ -590,28 +597,11 @@ func (l *logQueuer) newLogger(ctx context.Context, log agentLog) (agentLoggerLif
 	}
 	supportsRole := buildInfoErr == nil && versionAtLeast(buildInfo.Version, "v2.31.0")
 
-	var (
-		logDest agentsdk.LogDest
-		rpcConn drpc.Conn
-	)
-	if supportsRole {
-		arpc, _, err := client.ConnectRPC28WithRole(gracefulCtx, "logstream-kube")
-		if err != nil {
-			logger.Error(ctx, "drpc connect with role", slog.Error(err))
-			gracefulCancel()
-			return agentLoggerLifecycle{}, err
-		}
-		logDest = arpc
-		rpcConn = arpc.DRPCConn()
-	} else {
-		arpc, err := client.ConnectRPC20(gracefulCtx)
-		if err != nil {
-			logger.Error(ctx, "drpc connect", slog.Error(err))
-			gracefulCancel()
-			return agentLoggerLifecycle{}, err
-		}
-		logDest = arpc
-		rpcConn = arpc.DRPCConn()
+	logDest, rpcConn, err := client.connectLogDest(gracefulCtx, supportsRole)
+	if err != nil {
+		logger.Error(ctx, "drpc connect", slog.Error(err))
+		gracefulCancel()
+		return agentLoggerLifecycle{}, err
 	}
 	go func() {
 		err := ls.SendLoop(gracefulCtx, logDest)
@@ -690,7 +680,9 @@ func (l *logQueuer) processLog(ctx context.Context, log agentLog) {
 	if len(queuedLogs) == 0 {
 		return
 	}
-	if err := lgr.scriptLogger.Send(ctx, queuedLogs...); err != nil {
+	sendErr := lgr.scriptLogger.Send(ctx, queuedLogs...)
+	l.metrics.record(methodSendLog, sendErr)
+	if sendErr != nil {
 		l.scheduleRetry(ctx, log.agentToken)
 		return
 	}
