@@ -21,9 +21,9 @@ require (
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/mod v0.33.0
 	google.golang.org/protobuf v1.36.11
-	k8s.io/api v0.34.1
+	k8s.io/api v0.35.3
 	k8s.io/apimachinery v0.35.3
-	k8s.io/client-go v0.34.1
+	k8s.io/client-go v0.35.3
 	storj.io/drpc v0.0.34
 )
 
@@ -48,7 +48,7 @@ require (
 	github.com/DataDog/gostackparse v0.7.0 // indirect
 	github.com/DataDog/opentelemetry-mapping-go/pkg/otlp/attributes v0.26.0 // indirect
 	github.com/DataDog/sketches-go v1.4.7 // indirect
-	github.com/Masterminds/semver/v3 v3.3.1 // indirect
+	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d // indirect
 	github.com/agext/levenshtein v1.2.3 // indirect
