@@ -6,7 +6,7 @@ go 1.25.7
 replace tailscale.com => github.com/coder/tailscale v1.1.1-0.20250829055706-6eafe0f9199e
 
 require (
-	cdr.dev/slog/v3 v3.0.0-rc1
+	cdr.dev/slog/v3 v3.0.0
 	github.com/breml/rootcerts v0.3.4
 	github.com/coder/coder/v2 v2.10.1-0.20260218084406-f016d9e50553
 	github.com/coder/quartz v0.3.0
