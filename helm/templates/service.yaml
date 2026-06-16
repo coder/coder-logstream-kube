@@ -117,6 +117,10 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command:
             - /coder-logstream-kube
+          {{- with .Values.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- if .Values.metrics.enabled }}
           ports:
             - name: metrics
