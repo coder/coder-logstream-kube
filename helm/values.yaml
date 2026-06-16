@@ -15,7 +15,7 @@ volumeMounts:
   # - name: "my-volume"
   #   mountPath: "/mnt/my-volume"
 
-# args -- A list of arguments to supply at runtime
+# args -- A list of optional arguments to supply at runtime.
 args: []
 
 # image -- The image to use.
