@@ -138,6 +138,14 @@ spec:
             - name: CODER_NAMESPACES
               value: {{ join "," .Values.namespaces }}
             {{- end }}
+            {{- if .Values.fieldSelector }}
+            - name: CODER_FIELD_SELECTOR
+              value: {{ .Values.fieldSelector | quote }}
+            {{- end }}
+            {{- if .Values.labelSelector }}
+            - name: CODER_LABEL_SELECTOR
+              value: {{ .Values.labelSelector | quote }}
+            {{- end }}
             {{- if .Values.image.sslCertFile }}
             - name: SSL_CERT_FILE
               value: {{ .Values.image.sslCertFile }}

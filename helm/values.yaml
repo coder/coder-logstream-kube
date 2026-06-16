@@ -5,6 +5,14 @@ url: ""
 # If unspecified or empty it will watch all namespaces.
 namespaces: []
 
+# fieldSelector -- Kubernetes field selector for filtering pods.
+# Use this filter instead of .values.namespaces
+fieldSelector: ""
+
+# labelSelector -- Kubernetes label selector for filtering pods
+# Use this filter instead of .values.namespaces
+labelSelector: ""
+
 # volumes -- A list of extra volumes to add to the coder-logstream pod.
 volumes:
   #   emptyDir: {}
