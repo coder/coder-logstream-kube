@@ -237,7 +237,7 @@ func (p *podEventLogger) initNamespace(namespace string) error {
 					p.sendLog(pod.Name, token, agentsdk.Log{
 						CreatedAt: time.Now(),
 						Output:    fmt.Sprintf("🐳 %s: %s", newColor(color.Bold).Sprint("Created pod"), pod.Name),
-						Level:     codersdk.LogLevelInfo,
+						Level:     codersdk.LogLevelDebug,
 					})
 				}
 			}
@@ -306,7 +306,7 @@ func (p *podEventLogger) initNamespace(namespace string) error {
 					p.sendLog(replicaSet.Name, token, agentsdk.Log{
 						CreatedAt: time.Now(),
 						Output:    fmt.Sprintf("🐳 %s: %s", newColor(color.Bold).Sprint("Queued pod from ReplicaSet"), replicaSet.Name),
-						Level:     codersdk.LogLevelInfo,
+						Level:     codersdk.LogLevelDebug,
 					})
 				}
 			}
@@ -370,7 +370,7 @@ func (p *podEventLogger) initNamespace(namespace string) error {
 				p.sendLog(event.InvolvedObject.Name, token, agentsdk.Log{
 					CreatedAt: time.Now(),
 					Output:    newColor(color.FgWhite).Sprint(event.Message),
-					Level:     codersdk.LogLevelInfo,
+					Level:     codersdk.LogLevelDebug,
 				})
 				p.logger.Info(p.ctx, "sending log", slog.F("pod", event.InvolvedObject.Name), slog.F("message", event.Message))
 			}
