@@ -9,7 +9,7 @@ require (
 	cdr.dev/slog/v3 v3.0.0
 	github.com/breml/rootcerts v0.3.4
 	github.com/coder/coder/v2 v2.10.1-0.20260218084406-f016d9e50553
-	github.com/coder/quartz v0.3.0
+	github.com/coder/quartz v0.3.1
 	github.com/coder/serpent v0.14.0
 	github.com/coder/websocket v1.8.14
 	github.com/fatih/color v1.19.0
