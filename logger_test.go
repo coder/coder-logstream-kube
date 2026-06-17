@@ -1419,6 +1419,10 @@ func (*fakeAgentAPI) ReportConnection(_ context.Context, _ *proto.ReportConnecti
 	panic("not implemented")
 }
 
+func (*fakeAgentAPI) UpdateAppStatus(_ context.Context, _ *proto.UpdateAppStatusRequest) (*proto.UpdateAppStatusResponse, error) {
+	panic("not implemented")
+}
+
 func (f *fakeAgentAPI) BatchCreateLogs(_ context.Context, req *proto.BatchCreateLogsRequest) (*proto.BatchCreateLogsResponse, error) {
 	f.logs <- req.Logs
 	return &proto.BatchCreateLogsResponse{}, nil
