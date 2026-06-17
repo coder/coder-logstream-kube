@@ -1,6 +1,6 @@
 module github.com/coder/coder-logstream-kube
 
-go 1.25.7
+go 1.26.4
 
 // Required to import the agentsdk!
 replace tailscale.com => github.com/coder/tailscale v1.1.1-0.20250829055706-6eafe0f9199e
