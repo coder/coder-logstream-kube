@@ -59,7 +59,7 @@ serviceAccount:
 
 rbac:
   # rbac.roleName -- The name of the role created in Kubernetes.
-  roleName: coder-logstream-kube
+  roleName: coder-logstream-kube-role
   # rbac.roleBindingName -- The name of the role binding created in Kubernetes.
   roleBindingName: coder-logstream-kube-rolebinding
 
