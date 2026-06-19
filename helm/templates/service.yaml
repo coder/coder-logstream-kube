@@ -16,7 +16,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: coder-logstream-kube-role
+  name: {{ $.Values.rbac.roleName }}
   namespace: {{ . }}
 rules:
 {{ include "coder-logstream-kube.rules" . | nindent 2 }}
@@ -24,12 +24,12 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: coder-logstream-kube-rolebinding
+  name: {{ $.Values.rbac.roleBindingName }}
   namespace: {{ . }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: coder-logstream-kube-role
+  name: {{ $.Values.rbac.roleName }}
 subjects:
 - kind: ServiceAccount
   name: {{ $.Values.serviceAccount.name | quote }}
@@ -40,18 +40,18 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: coder-logstream-kube-role
+  name: {{ $.Values.rbac.roleName }}
 rules:
 {{ include "coder-logstream-kube.rules" . | nindent 2 }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: coder-logstream-kube-rolebinding
+  name: {{ $.Values.rbac.roleBindingName }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: coder-logstream-kube-role
+  name: {{ $.Values.rbac.roleName }}
 subjects:
 - kind: ServiceAccount
   name: {{ .Values.serviceAccount.name | quote }}
@@ -68,7 +68,7 @@ metadata:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: coder-logstream-kube
+  name: {{ .Release.Name }}
 spec:
   # This must remain at 1 otherwise duplicate logs can occur!
   replicas: 1

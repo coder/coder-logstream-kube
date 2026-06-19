@@ -57,6 +57,12 @@ serviceAccount:
   # coder.serviceAccount.name -- The service account name
   name: coder-logstream-kube
 
+rbac:
+  # rbac.roleName -- The name of the role created in Kubernetes.
+  roleName: coder-logstream-kube-role
+  # rbac.roleBindingName -- The name of the role binding created in Kubernetes.
+  roleBindingName: coder-logstream-kube-rolebinding
+
 # resources -- The resources to request for the Deployment. These are optional
 # and are not set by default.
 resources:
