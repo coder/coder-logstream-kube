@@ -1274,8 +1274,8 @@ func newFakeAgentAPI(t *testing.T) *fakeAgentAPI {
 	mux := drpcmux.New()
 	fakeAPI := &fakeAgentAPI{
 		disconnect: make(chan struct{}),
-		logs:       make(chan []*proto.Log),
-		logSource:  make(chan agentsdk.PostLogSourceRequest),
+		logs:       make(chan []*proto.Log, 32),
+		logSource:  make(chan agentsdk.PostLogSourceRequest, 32),
 	}
 	err := proto.DRPCRegisterAgent(mux, fakeAPI)
 	require.NoError(t, err)
@@ -1340,8 +1340,8 @@ func newFakeAgentAPI(t *testing.T) *fakeAgentAPI {
 func newFailingAgentAPI(t *testing.T) *fakeAgentAPI {
 	fakeAPI := &fakeAgentAPI{
 		disconnect: make(chan struct{}),
-		logs:       make(chan []*proto.Log),
-		logSource:  make(chan agentsdk.PostLogSourceRequest),
+		logs:       make(chan []*proto.Log, 32),
+		logSource:  make(chan agentsdk.PostLogSourceRequest, 32),
 	}
 
 	// Create a server that always returns 401 Unauthorized errors
