@@ -11,7 +11,7 @@ require (
 	github.com/coder/coder/v2 v2.34.2
 	github.com/coder/quartz v0.3.1
 	github.com/coder/serpent v0.15.0
-	github.com/coder/websocket v1.8.14
+	github.com/coder/websocket v1.8.15
 	github.com/fatih/color v1.19.0
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/google/uuid v1.6.0
