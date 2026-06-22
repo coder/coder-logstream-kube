@@ -1,0 +1,2 @@
+url: "http://coder.coder.svc.cluster.local"
+labelSelector: com.coder.deployment=dev-coder.nicecorp.org

@@ -1,0 +1,8 @@
+url: "http://coder.coder.svc.cluster.local"
+resources:
+  limits:
+    cpu: 500m
+    memory: 500Mi
+  requests:
+    cpu: 2000m
+    memory: 2000Mi

@@ -1,0 +1,4 @@
+url: "http://coder.coder.svc.cluster.local"
+labels:
+  label-one: turtle
+  label-two: cat

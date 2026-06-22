@@ -1,0 +1,9 @@
+url: "http://coder.coder.svc.cluster.local"
+image:
+  repo: custom-internal-registry.nicecorp.org/coder-logstream-kube
+  tag: v1.2.3
+  pullPolicy: Always
+  pullSecrets: 
+    - name: super-secret-pull-secret
+  sslCertFile: /etc/ssl/certs/my-custom-cert.pem
+  sslCertDir: /etc/ssl/certs/my-custom-cert-directory/

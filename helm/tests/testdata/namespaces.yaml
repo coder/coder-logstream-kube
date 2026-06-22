@@ -1,0 +1,4 @@
+url: "http://coder.coder.svc.cluster.local"
+namespaces:
+  - coder
+  - coder-workloads
