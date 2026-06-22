@@ -1,4 +1,0 @@
-url: "http://coder.coder.svc.cluster.local"
-nodeSelector:
-  kubernetes.io/os: linux
-  topology.kubernetes.io/zone: us-east-1a

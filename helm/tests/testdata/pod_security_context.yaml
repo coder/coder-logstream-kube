@@ -1,3 +1,0 @@
-url: "http://coder.coder.svc.cluster.local"
-podSecurityContext:
-  fsGroup: 655

@@ -1,2 +1,0 @@
-url: "http://coder.coder.svc.cluster.local"
-fieldSelector: status.phase!=Succeeded

@@ -1,6 +1,0 @@
-url: "http://coder.coder.svc.cluster.local"
-securityContext:
-  runAsNonRoot: true
-  runAsUser: 655
-  runAsGroup: 655
-  allowPrivilegeEscalation: true

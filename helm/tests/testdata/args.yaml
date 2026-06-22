@@ -1,4 +1,0 @@
-url: "http://coder.coder.svc.cluster.local"
-args:
-  - --coder-url
-  - "http://coder.coder.svc.cluster.local"

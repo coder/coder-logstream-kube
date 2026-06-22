@@ -1,4 +1,0 @@
-url: "http://coder.coder.svc.cluster.local"
-rbac:
-  roleName: coder-logstream-kube-custom-role-name
-  roleBindingName: coder-logstream-kube-rolebinding-custom-rb-name

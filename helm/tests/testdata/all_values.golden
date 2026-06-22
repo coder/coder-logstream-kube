@@ -1,0 +1,169 @@
+---
+# Source: coder-logstream-kube/templates/service.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: "coder-logstream-kube-custom-name"
+  annotations: 
+    golden: test
+  labels: 
+    testing: golden
+---
+# Source: coder-logstream-kube/templates/service.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: coder-logstream-kube-custom-role-name
+  namespace: coder
+rules:
+
+  - apiGroups: [""]
+    resources: ["pods", "events"]
+    verbs: ["get", "watch", "list"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets", "events"]
+    verbs: ["get", "watch", "list"]
+---
+# Source: coder-logstream-kube/templates/service.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: coder-logstream-kube-custom-role-name
+  namespace: coder-workloads
+rules:
+
+  - apiGroups: [""]
+    resources: ["pods", "events"]
+    verbs: ["get", "watch", "list"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets", "events"]
+    verbs: ["get", "watch", "list"]
+---
+# Source: coder-logstream-kube/templates/service.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: coder-logstream-kube-rolebinding-custom-rb-name
+  namespace: coder
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: coder-logstream-kube-custom-role-name
+subjects:
+- kind: ServiceAccount
+  name: "coder-logstream-kube-custom-name"
+  namespace: default
+---
+# Source: coder-logstream-kube/templates/service.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: coder-logstream-kube-rolebinding-custom-rb-name
+  namespace: coder-workloads
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: coder-logstream-kube-custom-role-name
+subjects:
+- kind: ServiceAccount
+  name: "coder-logstream-kube-custom-name"
+  namespace: default
+---
+# Source: coder-logstream-kube/templates/service.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: release-name
+spec:
+  # This must remain at 1 otherwise duplicate logs can occur!
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: release-name
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: release-name
+        label-one: turtle
+        label-two: cat
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9998"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: "coder-logstream-kube-custom-name"
+      restartPolicy: Always
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/instance
+                  operator: In
+                  values:
+                  - coder-logstream-kube
+              topologyKey: kubernetes.io/hostname
+            weight: 1
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          operator: Equal
+          value: monitoring
+        - effect: NoExecute
+          key: node.kubernetes.io/not-ready
+          operator: Exists
+          tolerationSeconds: 30
+      nodeSelector:
+        kubernetes.io/os: linux
+        topology.kubernetes.io/zone: us-east-1a
+      podSecurityContext:
+        fsGroup: 655
+      containers:
+        - name: coder-logstream-kube
+          image: "ghcr.io/coder/coder-logstream-kube:latest"
+          imagePullPolicy: IfNotPresent
+          command:
+            - /coder-logstream-kube
+          args:
+            - --coder-url
+            - http://coder.coder.svc.cluster.local
+          ports:
+            - name: metrics
+              containerPort: 9998
+              protocol: TCP
+          resources: 
+            limits:
+              cpu: 500m
+              memory: 500Mi
+            requests:
+              cpu: 2000m
+              memory: 2000Mi
+          env:
+            - name: CODER_URL
+              value: http://coder.coder.svc.cluster.local
+            - name: CODER_LOGSTREAM_METRICS_ADDR
+              value: ":9998"
+            - name: CODER_NAMESPACES
+              value: coder,coder-workloads
+            - name: CODER_LABEL_SELECTOR
+              value: "com.coder.deployment=dev-coder.nicecorp.org"
+          securityContext:
+            allowPrivilegeEscalation: true
+            runAsGroup: 655
+            runAsNonRoot: true
+            runAsUser: 655
+          volumeMounts:
+            - mountPath: /etc/ssl/custom
+              name: custom-ca
+              readOnly: true
+      volumes:
+        - configMap:
+            name: custom-ca-cert
+          name: custom-ca

@@ -32,67 +32,7 @@ var testCases = []testCase{
 		expectedError: "",
 	},
 	{
-		name:          "affinity",
-		expectedError: "",
-	},
-	{
-		name:          "args",
-		expectedError: "",
-	},
-	{
-		name:          "field_selector",
-		expectedError: "",
-	},
-	{
-		name:          "image",
-		expectedError: "",
-	},
-	{
-		name:          "label_selector",
-		expectedError: "",
-	},
-	{
-		name:          "labels",
-		expectedError: "",
-	},
-	{
-		name:          "metrics",
-		expectedError: "",
-	},
-	{
-		name:          "namespaces",
-		expectedError: "",
-	},
-	{
-		name:          "node_selector",
-		expectedError: "",
-	},
-	{
-		name:          "pod_security_context",
-		expectedError: "",
-	},
-	{
-		name:          "rbac",
-		expectedError: "",
-	},
-	{
-		name:          "resources",
-		expectedError: "",
-	},
-	{
-		name:          "security_context",
-		expectedError: "",
-	},
-	{
-		name:          "service_account",
-		expectedError: "",
-	},
-	{
-		name:          "tolerations",
-		expectedError: "",
-	},
-	{
-		name:          "volumes",
+		name:          "all_values",
 		expectedError: "",
 	},
 }
