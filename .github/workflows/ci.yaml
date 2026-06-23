@@ -86,7 +86,7 @@ jobs:
         with:
           go-version: "~1.26"
       - name: Setup Helm
-        uses: azure/setup-helm@f0accbfd55e3332a28f721b8202b1016cecf90d5 # v5
+        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5
         with:
           version: "v3.18.3"
       - name: Run Helm chart tests
