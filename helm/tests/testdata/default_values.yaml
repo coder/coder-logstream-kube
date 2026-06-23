@@ -1,0 +1,3 @@
+url: "http://coder.coder.svc.cluster.local"
+image:
+  tag: "latest"
