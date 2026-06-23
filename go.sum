@@ -258,8 +258,8 @@ github.com/coder/tailscale v1.1.1-0.20260519043957-6f014ff9434f h1:gYivllu5CHhvR
 github.com/coder/tailscale v1.1.1-0.20260519043957-6f014ff9434f/go.mod h1:WTWP5ZNODDXHwWlQ1Jc2MFhqxu93pUs7lIy28Fd5a5E=
 github.com/coder/terraform-provider-coder/v2 v2.18.0 h1:b60ixwf7pVPuiL0GkHZf+1mVj94/HZhCNpsfjAK34mI=
 github.com/coder/terraform-provider-coder/v2 v2.18.0/go.mod h1:Yowo7rLIWw3OOhWSY7LjB57kld3xiFEcUbSI04cnRpU=
-github.com/coder/websocket v1.8.14 h1:9L0p0iKiNOibykf283eHkKUHHrpG7f65OE3BhhO7v9g=
-github.com/coder/websocket v1.8.14/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
+github.com/coder/websocket v1.8.15 h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=
+github.com/coder/websocket v1.8.15/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
 github.com/containerd/continuity v0.4.5 h1:ZRoN1sXq9u7V6QoHMcVWGhOwDFqZ4B9i5H6un1Wh0x4=
 github.com/containerd/continuity v0.4.5/go.mod h1:/lNJvtJKUQStBzpVQ1+rasXO1LAWtUQssk28EZvJ3nE=
 github.com/containerd/errdefs v1.0.0 h1:tg5yIfIlQIrxYtu9ajqY42W3lpS19XqdxRQeEwYG8PI=
