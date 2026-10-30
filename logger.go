@@ -42,6 +42,13 @@ type podEventLoggerOptions struct {
 	// maxRetries is the maximum number of retries for a log send failure.
 	maxRetries int
 
+	// heartbeatInterval is how often the work loop records progress while idle.
+	// livenessTimeout is how long the work loop may go without progress before the
+	// logQueuer is reported as stalled. Both are optional; when unset the defaults
+	// below apply.
+	heartbeatInterval time.Duration
+	livenessTimeout   time.Duration
+
 	metrics *metricsCollector
 
 	// The following fields are optional!
@@ -67,6 +74,14 @@ func newPodEventLogger(ctx context.Context, opts podEventLoggerOptions) (*podEve
 	if opts.metrics == nil {
 		opts.metrics = newMetricsCollector()
 	}
+	if opts.heartbeatInterval == 0 {
+		opts.heartbeatInterval = 15 * time.Second
+	}
+	if opts.livenessTimeout == 0 {
+		// livenessTimeout must be several multiples of heartbeatInterval so that a
+		// work loop which is slow but not wedged is not falsely reported as stalled.
+		opts.livenessTimeout = 60 * time.Second
+	}
 
 	logCh := make(chan agentLog, 512)
 	ctx, cancelFunc := context.WithCancel(ctx)
@@ -91,8 +106,10 @@ func newPodEventLogger(ctx context.Context, opts podEventLoggerOptions) (*podEve
 			logCache: logCache{
 				logs: map[string][]agentsdk.Log{},
 			},
-			maxRetries: opts.maxRetries,
-			metrics:    opts.metrics,
+			maxRetries:        opts.maxRetries,
+			metrics:           opts.metrics,
+			heartbeatInterval: opts.heartbeatInterval,
+			livenessTimeout:   opts.livenessTimeout,
 		},
 		doneChan: make(chan struct{}),
 	}
@@ -527,11 +544,34 @@ type logQueuer struct {
 	maxRetries int
 
 	metrics *metricsCollector
+
+	// heartbeat is the interval at which work() marks progress while idle, and
+	// livenessTimeout is how long work() may go without making progress before the
+	// logQueuer is considered stalled. progressMu guards lastProgress. This is a
+	// separate lock from mu so the health endpoint can still report a stalled work
+	// loop that is wedged holding mu (as in the retry deadlock).
+	heartbeatInterval time.Duration
+	livenessTimeout   time.Duration
+	progressMu        sync.Mutex
+	lastProgress      time.Time
 }
 
 func (l *logQueuer) work(ctx context.Context, done chan struct{}) {
 	defer close(done)
 	defer l.cleanup()
+
+	// Record progress at startup so a freshly started process is healthy even before
+	// the first event arrives.
+	l.markProgress()
+
+	// A nil channel never fires, so when the interval is unset the heartbeat case is
+	// simply never selected and the work loop only marks progress on a real event.
+	var heartbeat <-chan time.Time
+	if l.heartbeatInterval > 0 {
+		ticker := l.clock.NewTicker(l.heartbeatInterval)
+		defer ticker.Stop()
+		heartbeat = ticker.C
+	}
 
 	for ctx.Err() == nil {
 		select {
@@ -542,12 +582,41 @@ func (l *logQueuer) work(ctx context.Context, done chan struct{}) {
 			case opDelete:
 				l.processDelete(log)
 			}
+			// The work loop made progress; refresh lastProgress so a busy-but-alive
+			// loop is never falsely reported as stalled.
+			l.markProgress()
+
+		case <-heartbeat:
+			// Idle heartbeat: refresh lastProgress so a quiescent loop remains healthy.
+			l.markProgress()
 
 		case <-ctx.Done():
 			return
 		}
 
 	}
+}
+
+// markProgress records that the work loop has made progress. It is safe to call
+// concurrently with the health endpoint. If the work loop is wedged (for example,
+// holding mu across a full-queue send), it stops calling markProgress and the
+// health endpoint reports it as stalled.
+func (l *logQueuer) markProgress() {
+	l.progressMu.Lock()
+	defer l.progressMu.Unlock()
+	l.lastProgress = l.clock.Now()
+}
+
+// stalled reports whether the work loop has not made progress within
+// livenessTimeout. It uses a separate lock (progressMu) from mu so it can still
+// report a loop wedged holding mu.
+func (l *logQueuer) stalled() bool {
+	l.progressMu.Lock()
+	defer l.progressMu.Unlock()
+	if l.lastProgress.IsZero() {
+		return true
+	}
+	return l.clock.Since(l.lastProgress) > l.livenessTimeout
 }
 
 // cleanup stops all retry timers and cleans up resources when the work loop exits.

@@ -32,6 +32,7 @@ func root() *serpent.Command {
 		namespacesStr string
 		labelSelector string
 		metricsAddr   string
+		healthAddr    string
 	)
 	cmd := &serpent.Command{
 		Use:   "coder-logstream-kube",
@@ -84,6 +85,14 @@ func root() *serpent.Command {
 				Default:     "",
 				Value:       serpent.StringOf(&metricsAddr),
 				Description: "Address to serve Prometheus metrics on. Set to empty to disable.",
+			},
+			{
+				Name:        "health-addr",
+				Flag:        "health-addr",
+				Env:         "CODER_LOGSTREAM_HEALTH_ADDR",
+				Default:     ":8080",
+				Value:       serpent.StringOf(&healthAddr),
+				Description: "Address to serve the liveness health endpoint on. Set to empty to disable.",
 			},
 		},
 		Handler: func(inv *serpent.Invocation) error {
@@ -153,6 +162,18 @@ func root() *serpent.Command {
 				go func() {
 					if err := http.ListenAndServe(metricsAddr, mux); err != nil {
 						logger.Error(inv.Context(), "metrics server failed", slog.Error(err))
+					}
+				}()
+			}
+
+			// The liveness probe runs even when metrics are disabled so that a wedged
+			// work loop is always detectable, independently of metrics configuration.
+			if healthAddr != "" {
+				healthMux := http.NewServeMux()
+				healthMux.Handle("/healthz", livenessHandler(reporter.lq.stalled))
+				go func() {
+					if err := http.ListenAndServe(healthAddr, healthMux); err != nil {
+						logger.Error(inv.Context(), "health server failed", slog.Error(err))
 					}
 				}()
 			}

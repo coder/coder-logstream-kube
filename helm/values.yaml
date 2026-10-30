@@ -110,6 +110,28 @@ metrics:
   # metrics.port -- The port to serve Prometheus metrics on.
   port: 9100
 
+# health -- Liveness health configuration.
+# The health endpoint reports whether the log work loop is making progress and
+# is always served, independently of metrics. Kubernetes uses it to restart the
+# pod when the work loop is wedged (for example, by the retry deadlock), bounding
+# the duration of an outage.
+health:
+  # health.port -- The port to serve the liveness health endpoint on.
+  port: 8080
+  # health.livenessProbe -- The Kubernetes liveness probe configuration. Set
+  # enable to false to disable the probe entirely.
+  livenessProbe:
+    # health.livenessProbe.enable -- Whether to add a liveness probe to the Deployment.
+    enable: true
+    # health.livenessProbe.initialDelaySeconds -- Seconds to wait before the first probe.
+    initialDelaySeconds: 10
+    # health.livenessProbe.periodSeconds -- How often to run the probe.
+    periodSeconds: 10
+    # health.livenessProbe.timeoutSeconds -- Seconds to wait before giving up on a single probe.
+    timeoutSeconds: 3
+    # health.livenessProbe.failureThreshold -- Number of consecutive failures before restarting.
+    failureThreshold: 3
+
 # labels -- The pod labels for coder-logstream-kube. See:
 # https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/
 labels: {}

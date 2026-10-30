@@ -121,11 +121,18 @@ spec:
           args:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if .Values.metrics.enabled }}
+          {{- if or .Values.metrics.enabled .Values.health.livenessProbe.enable }}
           ports:
+            {{- if .Values.metrics.enabled }}
             - name: metrics
               containerPort: {{ .Values.metrics.port }}
               protocol: TCP
+            {{- end }}
+            {{- if .Values.health.livenessProbe.enable }}
+            - name: health
+              containerPort: {{ .Values.health.port }}
+              protocol: TCP
+            {{- end }}
           {{- end }}
           resources: {{ toYaml .Values.resources | nindent 12 }}
           env:
@@ -158,12 +165,24 @@ spec:
             - name: SSL_CERT_DIR
               value: {{ .Values.image.sslCertDir }}
             {{- end }}
+            - name: CODER_LOGSTREAM_HEALTH_ADDR
+              value: ":{{ .Values.health.port }}"
           {{- with .Values.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           {{- if .Values.volumeMounts }}
           volumeMounts: {{- toYaml .Values.volumeMounts | nindent 12 }}
+          {{- end }}
+          {{- if .Values.health.livenessProbe.enable }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: {{ .Values.health.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.health.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.health.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.health.livenessProbe.failureThreshold }}
           {{- end }}
       {{- if .Values.volumes }}
       volumes: {{- toYaml .Values.volumes | nindent 8 }}

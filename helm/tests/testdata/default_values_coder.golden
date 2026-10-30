@@ -64,6 +64,10 @@ spec:
           imagePullPolicy: IfNotPresent
           command:
             - /coder-logstream-kube
+          ports:
+            - name: health
+              containerPort: 8080
+              protocol: TCP
           resources: 
             {}
           env:
@@ -71,8 +75,18 @@ spec:
               value: http://coder.coder.svc.cluster.local
             - name: CODER_LOGSTREAM_METRICS_ADDR
               value: ""
+            - name: CODER_LOGSTREAM_HEALTH_ADDR
+              value: ":8080"
           securityContext:
             allowPrivilegeEscalation: false
             runAsGroup: 65532
             runAsNonRoot: true
             runAsUser: 65532
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3

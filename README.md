@@ -59,6 +59,7 @@ When `namespaces` is empty or not specified, the service will monitor all namesp
 | `--field-selector`, `-f` | `CODER_FIELD_SELECTOR` | Kubernetes field selector for filtering pods |
 | `--label-selector`, `-l` | `CODER_LABEL_SELECTOR` | Kubernetes label selector for filtering pods |
 | `--kubeconfig`, `-k` | - | Path to kubeconfig file (default: `~/.kube/config`) |
+| `--health-addr` | `CODER_LOGSTREAM_HEALTH_ADDR` | Address to serve the liveness health endpoint on (default: `:8080`). Set to empty to disable. |
 
 ### Custom Certificates
 
