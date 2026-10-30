@@ -779,12 +779,21 @@ func (l *logQueuer) scheduleRetry(ctx context.Context, token string) {
 
 	rs.timer = l.clock.AfterFunc(rs.delay, func() {
 		l.mu.Lock()
-		defer l.mu.Unlock()
-
 		if cur := l.retries[token]; cur != nil && !cur.exhausted {
 			cur.timer = nil
-			l.q <- agentLog{op: opLog, agentToken: token}
+			l.mu.Unlock()
+
+			// Never hold l.mu across the channel send: the only consumer of l.q
+			// (work / processLog) needs l.mu to drain the queue. A full queue
+			// must become backpressure, not a deadlock. Selecting on ctx.Done()
+			// also lets shutdown proceed if the queue stays full.
+			select {
+			case l.q <- agentLog{op: opLog, agentToken: token}:
+			case <-ctx.Done():
+			}
+			return
 		}
+		l.mu.Unlock()
 	})
 
 	rs.delay *= 2
