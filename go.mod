@@ -6,7 +6,7 @@ go 1.26.4
 replace tailscale.com => github.com/coder/tailscale v1.1.1-0.20260519043957-6f014ff9434f
 
 require (
-	cdr.dev/slog/v3 v3.1.0
+	cdr.dev/slog/v3 v3.2.0
 	github.com/breml/rootcerts v0.3.7
 	github.com/coder/coder/v2 v2.34.2
 	github.com/coder/quartz v0.3.1
