@@ -8,6 +8,7 @@ metadata:
     {}
   labels: 
     {}
+
 ---
 # Source: coder-logstream-kube/templates/service.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -25,6 +26,7 @@ rules:
   - apiGroups: ["apps"]
     resources: ["replicasets", "events"]
     verbs: ["get", "watch", "list"]
+
 ---
 # Source: coder-logstream-kube/templates/service.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -39,6 +41,7 @@ subjects:
 - kind: ServiceAccount
   name: "coder-logstream-kube"
   namespace: coder
+
 ---
 # Source: coder-logstream-kube/templates/service.yaml
 apiVersion: apps/v1
