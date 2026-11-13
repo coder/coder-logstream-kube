@@ -63,6 +63,14 @@ rbac:
   # rbac.roleBindingName -- The name of the role binding created in Kubernetes.
   roleBindingName: coder-logstream-kube-rolebinding
 
+# nameOverride -- Name appended to the release name for the Deployment, e.g.
+# release "coder" with nameOverride "logstream-kube" gives "coder-logstream-kube".
+# When empty the Deployment is named after the release.
+nameOverride: ""
+
+# fullnameOverride -- Full name of the Deployment, replaces the release name.
+fullnameOverride: ""
+
 # resources -- The resources to request for the Deployment. These are optional
 # and are not set by default.
 resources:
