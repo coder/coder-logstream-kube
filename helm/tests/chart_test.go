@@ -35,6 +35,14 @@ var testCases = []testCase{
 		name:          "all_values",
 		expectedError: "",
 	},
+	{
+		name:          "name_override",
+		expectedError: "",
+	},
+	{
+		name:          "fullname_override",
+		expectedError: "",
+	},
 }
 
 type testCase struct {

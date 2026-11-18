@@ -68,7 +68,7 @@ metadata:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}
+  name: {{ include "coder-logstream-kube.fullname" . }}
 spec:
   # This must remain at 1 otherwise duplicate logs can occur!
   replicas: 1
