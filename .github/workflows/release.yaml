@@ -1,38 +1,191 @@
+# Releases coder-logstream-kube: the image, the Helm chart on helm.coder.com and ghcr.io, and
+# the GitHub release.
+#
+# To release, dispatch this workflow on main with a version and the commit on main to release:
+#
+#   gh workflow run release.yaml --repo coder/coder-logstream-kube --ref main \
+#     -f version=v0.0.17 -f commit="$(git rev-parse origin/main)"
+#
+# The release waits in the release-approval environment until a release manager other than the
+# person who dispatched it approves. Only then is the tag created, by the coder-release-publisher
+# App: the "Release tags" ruleset lets nobody else create, move or delete tags. Everything is
+# then built from the tag and published from the publish environment, which is the only place
+# the coder-logstream-kube service account can be used from.
 name: release
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. v0.0.17, or v0.0.17-rc.0 for a release candidate"
+        required: true
+        type: string
+      commit:
+        description: "Full SHA of the commit on main to release"
+        required: true
+        type: string
 
-permissions:
-  # Required to publish a release
-  contents: write
-  # Necessary to push docker images to ghcr.io.
-  packages: write
-  # Necessary for GCP authentication (https://github.com/google-github-actions/setup-gcloud#usage)
-  id-token: write
+permissions: {}
 
-concurrency: ${{ github.workflow }}-${{ github.ref }}
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 
 jobs:
-  release:
-    name: Build and publish
+  # Only a commit that went through review on main may be released, and only from main's copy
+  # of this file: Google Cloud KMS signs the release App's JWT for that copy only.
+  validate:
+    name: Validate the release
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check the inputs
+        env:
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$*"; exit 1; }
+
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || fail "Dispatch this workflow on main, not $GITHUB_REF."
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]] || fail "version must look like v1.2.3 or v1.2.3-rc.0, got '$VERSION'."
+          [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || fail "commit must be a full 40-character SHA, got '$COMMIT'."
+          git merge-base --is-ancestor "$COMMIT" "$GITHUB_SHA" || fail "$COMMIT is not on main."
+
+  # The release is tagged only after a reviewer of the release-approval environment approves
+  # this job. Only the coder-release-publisher App may create a tag. Its key is in Cloud KMS,
+  # and in this repository only this job (main's copy of this file, in release-approval) may
+  # sign with it. So the tag is created here, at a commit on main, and nobody can push one
+  # beforehand.
+  approve:
+    name: Approve and tag the release
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: release-approval
+    permissions:
+      contents: read
+      id-token: write # Cloud KMS signs the App's JWT
+    steps:
+      # For the tags and the history of main. Nothing from the tree runs in this job.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      # Here and not in the validate job, because the tags can change while the run waits for
+      # approval.
+      - name: Check the tag
+        id: check
+        env:
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$*"; exit 1; }
+
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]] || fail "version must look like v1.2.3 or v1.2.3-rc.0, got '$VERSION'."
+          [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || fail "commit must be a full 40-character SHA, got '$COMMIT'."
+          git merge-base --is-ancestor "$COMMIT" "$GITHUB_SHA" || fail "$COMMIT is not on main."
+
+          # A re-run finds the tag that the first attempt created.
+          if existing="$(git rev-parse --verify --quiet "refs/tags/$VERSION^{commit}")"; then
+            [[ "$existing" == "$COMMIT" ]] || fail "Tag $VERSION already exists at $existing, not at $COMMIT."
+            echo "Tag $VERSION already exists at $COMMIT."
+            echo "create=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Versions only go up, and a release never comes from before the last stable one.
+          latest="$(git tag --list 'v*' --sort=-version:refname | grep -E -m 1 '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)"
+          if [[ -n "$latest" ]]; then
+            base="${VERSION%%-*}"
+            [[ "$base" != "$latest" ]] || fail "$VERSION is not newer than $latest, the latest release."
+            printf '%s\n' "$latest" "$base" | sort -V -C || fail "$VERSION is not newer than $latest, the latest release."
+            git merge-base --is-ancestor "$latest" "$COMMIT" || fail "$COMMIT is older than the commit released as $latest."
+          fi
+
+          echo "create=true" >> "$GITHUB_OUTPUT"
+
+      # The App can also write to other repositories, so the token is asked for this one only.
+      - name: Generate release App token
+        id: app_token
+        if: ${{ steps.check.outputs.create == 'true' }}
+        uses: coder/github-app-token-action@00eaec58ee1bfea9c8b48655b7ab7470b07739e5 # main 2026-11-17
+        with:
+          client-id: ${{ secrets.CODER_RELEASE_PUBLISHER_APP_ID }}
+          kms-key: ${{ secrets.CODER_RELEASE_PUBLISHER_APP_KMS_KEY }}
+          workload-identity-provider: ${{ secrets.APP_KEYS_WORKLOAD_ID_PROVIDER }}
+          owner: coder
+          repositories: coder-logstream-kube
+          permissions: |
+            contents: write
+            workflows: write
+
+      # An annotated tag, through the API: nothing is pushed from this job's checkout.
+      - name: Create the tag
+        if: ${{ steps.check.outputs.create == 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/tags" \
+            -f tag="$VERSION" -f message="Release $VERSION" -f object="$COMMIT" -f type=commit \
+            --jq .sha)"
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$VERSION" -f sha="$tag_object" >/dev/null
+          echo "Created tag $VERSION at $COMMIT."
+
+  # Builds everything from the tag and publishes it. Google Cloud only lets jobs in the publish
+  # environment (main only) act as coder-logstream-kube.
+  publish:
+    name: Build and publish
+    needs: approve
+    runs-on: ubuntu-latest
+    environment: publish
+    permissions:
+      contents: write # create the GitHub release
+      packages: write # push the image and the OCI chart to ghcr.io
+      id-token: write # authenticate to Google Cloud
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.version }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # scripts/version.sh reads the version from the tags (git describe picks the newest tag on
+      # the commit, which matters when a release candidate's commit is released), so check that
+      # it finds this one.
+      - name: Check the version
+        id: version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          actual="$(./scripts/version.sh)"
+          if [[ "$actual" != "$VERSION" ]]; then
+            echo "::error::scripts/version.sh reports $actual, not $VERSION."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "~1.26"
 
-      - name: Get Version
-        run: echo "version=$(./scripts/version.sh)" >> $GITHUB_OUTPUT
-        id: version
-
       - name: Docker Login
-        uses: docker/login-action@v4.8.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -44,55 +197,53 @@ jobs:
           CI: true
 
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v3
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_ID_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: projects/898976630798/locations/global/workloadIdentityPools/coder-ci/providers/github-actions
+          service_account: coder-logstream-kube@coder-customer-releases.iam.gserviceaccount.com
 
       - name: Setup GCloud SDK
-        uses: "google-github-actions/setup-gcloud@v3"
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
 
       - name: Package Helm Chart
-        run: |
-          set -euo pipefail
-          version="$(./scripts/version.sh)"
-          ./scripts/helm.sh --version $version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: ./scripts/helm.sh --version "$VERSION"
 
       - name: Publish Helm Chart to traditional registry
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          version="$(./scripts/version.sh)"
-
           mkdir -p build/helm
-          cp "build/${version}.tgz" build/helm
+          cp "build/${VERSION}.tgz" build/helm
           gsutil cp gs://helm.coder.com/logstream-kube/index.yaml build/helm/index.yaml
           helm repo index build/helm --url https://helm.coder.com/logstream-kube --merge build/helm/index.yaml
-          gsutil -h "Cache-Control:no-cache,max-age=0" cp build/helm/${version}.tgz gs://helm.coder.com/logstream-kube
+          gsutil -h "Cache-Control:no-cache,max-age=0" cp "build/helm/${VERSION}.tgz" gs://helm.coder.com/logstream-kube
           gsutil -h "Cache-Control:no-cache,max-age=0" cp build/helm/index.yaml gs://helm.coder.com/logstream-kube
 
       - name: Publish Helm Chart to OCI registry
-        run: |
-          set -euo pipefail
-          version="$(./scripts/version.sh)"
-          helm push "build/${version}.tgz" oci://ghcr.io/coder/chart
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: helm push "build/${VERSION}.tgz" oci://ghcr.io/coder/chart
 
       - name: Create and upload release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          version=${{ steps.version.outputs.version }}
 
           # check if release already exists and match the version
-          if [[ $(gh release view $version --json name -q '.name' | cat) == $version ]]; then
-            echo "Release $version already exists"
+          if [[ $(gh release view "$VERSION" --json name -q '.name' | cat) == "$VERSION" ]]; then
+            echo "Release $VERSION already exists"
             exit 0
           fi
 
-          echo "Creating release $version"
+          echo "Creating release $VERSION"
           # if version contains -rc, publish as a pre-release and don't set as latest
-          if [[ $version == *-rc* ]]; then
-            gh release create $version -t $version --generate-notes --prerelease --latest=false --verify-tag build/${version}.tgz#helm.tar.gz
+          if [[ $VERSION == *-rc* ]]; then
+            gh release create "$VERSION" -t "$VERSION" --generate-notes --prerelease --latest=false --verify-tag "build/${VERSION}.tgz#helm.tar.gz"
           else
-            gh release create $version -t $version --generate-notes --verify-tag build/${version}.tgz#helm.tar.gz
+            gh release create "$VERSION" -t "$VERSION" --generate-notes --verify-tag "build/${VERSION}.tgz#helm.tar.gz"
           fi
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
