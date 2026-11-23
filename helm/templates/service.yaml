@@ -68,7 +68,7 @@ metadata:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}
+  name: {{ default .Release.Name .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 spec:
   # This must remain at 1 otherwise duplicate logs can occur!
   replicas: 1
