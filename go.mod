@@ -25,7 +25,7 @@ require (
 	k8s.io/api v0.37.2
 	k8s.io/apimachinery v0.37.2
 	k8s.io/client-go v0.37.1
-	storj.io/drpc v1.0.0
+	storj.io/drpc v1.1.0
 )
 
 require (
