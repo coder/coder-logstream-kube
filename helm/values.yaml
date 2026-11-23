@@ -23,6 +23,9 @@ volumeMounts:
   # - name: "my-volume"
   #   mountPath: "/mnt/my-volume"
 
+# fullnameOverride -- Override the Deployment name. Defaults to the release name.
+fullnameOverride: ""
+
 # args -- A list of optional arguments to supply at runtime.
 args: []
 
